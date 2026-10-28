@@ -29,6 +29,34 @@ On Render, these are set separately per-service in each service's Environment ta
 
 `DEMO_MODE=true` + `NODE_ENV=development` are intentional — this app has no real Firebase phone-OTP login or real Razorpay payments wired in yet (see "What's NOT done" below). Setting `NODE_ENV=production` while `DEMO_MODE=true` makes the backend refuse to start (`Backend/src/config.js`), by design.
 
+## Courier tracking: what to set up with the delivery company
+
+NTSA does not deliver with its own riders — an outside courier does. The Backend
+expects one webhook from that courier (or from an aggregator like Shiprocket),
+and will otherwise be driven by hand from the admin panel.
+
+1. Set `COURIER_WEBHOOK_SECRET` in the Backend's environment (any random string of
+   16+ characters). Leave it unset and the webhook route returns 404, which is the
+   safe default.
+2. Give the courier this endpoint: `POST https://<backend>/api/webhooks/courier`,
+   with the header `x-webhook-secret: <that secret>` and a JSON body:
+   `{ "awb": "...", "status": "Out For Delivery", "location": "Jaipur Hub",
+   "remarks": "...", "timestamp": "2026-10-28T10:00:00Z", "courier": "Delhivery" }`.
+   Most couriers can't send that shape as-is, so a small adapter (a tiny serverless
+   function, or a few lines in `routes.js`) maps their payload onto those fields.
+3. `status` is free text: `services/shipping.js` normalises each courier's own
+   wording ("OFD", "Undelivered", "RTO Initiated"...) onto our own statuses. A
+   status it does not recognise is still recorded, just as a plain update — check
+   `PATTERNS` there when onboarding a new courier.
+4. Unknown AWBs get a 202 (so the courier stops retrying), and the same event sent
+   twice is stored once. A late, out-of-order webhook can never un-deliver an order.
+5. The admin/support panel can do all of this by hand (courier + AWB, and "Add
+   update") for a courier with no webhook at all.
+
+Delivery OTP: right now the Backend still generates its own OTP, which the
+customer shows the rider. Most couriers send their own OTP instead — once a real
+courier is signed up, decide which one is in charge and turn the other off.
+
 ## Important gotchas learned the hard way
 
 1. **Render Static Site "Redirects/Rewrites" do NOT reliably proxy POST request bodies to an external destination.** We initially tried routing the admin panel's `/api/*` calls through a Rewrite rule to the backend — logins silently failed (POST arrived at the backend as something that didn't match the login route, backend's `auth` middleware then threw `"Please sign in again"`). The actual fix: `Frontend/web/src/api.js` now reads `import.meta.env.VITE_API_URL` (falls back to relative `/api` for local dev, where Vite's own dev-server proxy handles it) and calls the backend's real URL directly, with CORS configured on the backend (`CORS_ORIGIN` = the admin panel's exact origin). Don't re-introduce a static-site rewrite for API calls.
