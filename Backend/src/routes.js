@@ -428,6 +428,7 @@ router.get('/admin/late-orders', async (req, res) => {
         user: { select: { name: true, phone: true } }, vendor: { select: { name: true, phone: true } },
         items: { select: { id: true, name: true, quantity: true, packedAt: true, sellerId: true, seller: { select: { id: true, shopName: true, ownerName: true, phone: true } } } },
         events: { orderBy: { occurredAt: 'desc' }, take: 1, select: { title: true, location: true, occurredAt: true } },
+        tickets: { where: { status: 'OPEN' }, select: { id: true, kind: true, awaitingDeliveryTeam: true } },
       },
     }),
     getSettings(),
@@ -445,6 +446,8 @@ router.get('/admin/late-orders', async (req, res) => {
         customer: { name: o.address?.name || o.user?.name || o.vendor?.name || 'Customer', phone: o.address?.phone || o.user?.phone || o.vendor?.phone || null, city: o.address?.city || null },
         sellers,
         unpackedCount: o.items.filter(i => i.sellerId && !i.packedAt).length,
+        // Has the customer already complained about this one? Support is on it.
+        openTickets: o.tickets.map(t => ({ id: t.id, kind: t.kind, awaitingDeliveryTeam: t.awaitingDeliveryTeam })),
         items: o.items.map(i => ({ name: i.name, quantity: i.quantity, sellerName: i.seller?.shopName ?? null })),
       };
     });

@@ -6,22 +6,23 @@ import React, { useState } from 'react';
 import { AlertTriangle, ArrowUpRight, Phone, MessageCircle, Truck, Store, PackageX } from 'lucide-react';
 import { money } from '../api';
 import { Badge, Button, Empty } from '../ui';
+import { TrackingLine, ago } from './shipment';
 
 // Numbers saved without a country code are Indian mobiles (10 digits).
 const digits = s => String(s || '').replace(/\D/g, '');
 const intl = s => { const d = digits(s); return d.length === 10 ? `91${d}` : d; };
-const telHref = s => `tel:+${intl(s)}`;
-const waHref = (s, text) => `https://wa.me/${intl(s)}?text=${encodeURIComponent(text)}`;
+export const telHref = s => `tel:+${intl(s)}`;
+export const waHref = (s, text) => `https://wa.me/${intl(s)}?text=${encodeURIComponent(text)}`;
 
-const shortId = id => id.slice(-8).toUpperCase();
+export const shortId = id => id.slice(-8).toUpperCase();
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const lateText = o => o.daysLate >= 1 ? plural(o.daysLate, 'day') : plural(Math.max(1, o.hoursLate), 'hour');
 const dueText = o => new Date(o.dueAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 const statusText = s => s.replaceAll('_', ' ').toLowerCase();
 
 // What the admin sends to the delivery team, and to a seller, about one order.
-const teamMessage = o => `Order #${shortId(o.id)} for ${o.customer.name}${o.customer.city ? `, ${o.customer.city}` : ''} was due on ${dueText(o)} and is ${lateText(o)} late (status: ${statusText(o.status)}${o.deliveryPartner ? `, partner: ${o.deliveryPartner}` : ''}). Please update us on where it is and deliver it as soon as possible.`;
-const sellerMessage = (o, seller) => `Hello ${seller.shopName}, order #${shortId(o.id)} that includes your product(s) was due on ${dueText(o)} and is ${lateText(o)} late. ${o.unpackedCount > 0 ? 'Your items are not marked packed yet - please pack and hand them over immediately.' : 'Please check on your side and help us get it delivered.'}`;
+export const teamMessage = o => `Order #${shortId(o.id)} for ${o.customer.name}${o.customer.city ? `, ${o.customer.city}` : ''} was due on ${dueText(o)} and is ${lateText(o)} late (status: ${statusText(o.status)}${o.deliveryPartner ? `, partner: ${o.deliveryPartner}` : ''}). Please update us on where it is and deliver it as soon as possible.`;
+export const sellerMessage = (o, seller) => `Hello ${seller.shopName}, order #${shortId(o.id)} that includes your product(s) was due on ${dueText(o)} and is ${lateText(o)} late. ${o.unpackedCount > 0 ? 'Your items are not marked packed yet - please pack and hand them over immediately.' : 'Please check on your side and help us get it delivered.'}`;
 
 /** The red box. Renders nothing while no order is late. */
 export function LateOrdersBanner({ late, onOpen }) {
@@ -36,7 +37,7 @@ export function LateOrdersBanner({ late, onOpen }) {
   </button>;
 }
 
-function ContactButtons({ phone, message, label }) {
+export function ContactButtons({ phone, message, label }) {
   if (!phone) return <span className="late-no-phone">No number</span>;
   return <span className="late-contact">
     <a className="late-btn" href={telHref(phone)} aria-label={`Call ${label}`}><Phone size={13}/>Call</a>
@@ -73,6 +74,8 @@ export function LateOrdersPanel({ late, busy, onSavePhone, onOpenOrder }) {
           <strong>#{shortId(o.id)}</strong>
           <Badge>{o.status}</Badge>
           <span className="late-chip">{lateText(o)} late</span>
+          {/* The customer has already complained: support is on this one. */}
+          {o.openTickets?.length > 0 && <span className="late-chip">Customer complaint{o.openTickets.some(t => t.awaitingDeliveryTeam) ? ' · waiting on delivery team' : ''}</span>}
         </div>
         <small>Due {dueText(o)} · placed {new Date(o.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} · {money(o.totalPaise)}</small>
       </header>
@@ -81,6 +84,8 @@ export function LateOrdersPanel({ late, busy, onSavePhone, onOpenOrder }) {
           <strong>{o.customer.name}</strong>{o.customer.city ? <small>{o.customer.city}{o.customer.phone ? ` · ${o.customer.phone}` : ''}</small> : null}
           <small>{o.items.map(i => `${i.quantity} × ${i.name}`).join(', ')}</small>
           {o.deliveryPartner && <small>Delivery partner: {o.deliveryPartner}</small>}
+          <TrackingLine order={o}/>
+          {o.lastEvent && <small>Last seen: <strong>{o.lastEvent.title}</strong>{o.lastEvent.location ? `, ${o.lastEvent.location}` : ''}, {ago(o.lastEvent.occurredAt)}</small>}
           {o.unpackedCount > 0 && <small className="late-warn"><PackageX size={12} style={{ verticalAlign: -2 }}/> {plural(o.unpackedCount, 'item')} not packed by the seller yet</small>}
         </div>
         <div className="late-actions">

@@ -203,3 +203,23 @@
 [data-theme="dark"] .late-btn{background:#141c30;border-color:#28344d;color:#cdd7e6}
 [data-theme="dark"] .late-btn.wa{background:#12301f;border-color:#1f5a38;color:#7fd8a3}
 [data-theme="dark"] .late-row>span:first-child{color:#9fb0c4}
+.journey{list-style:none;margin:6px 0 4px;padding:0 0 0 16px;border-left:2px solid #dbe3e8}
+.journey li{position:relative;padding:2px 0 12px 12px}
+.journey li:before{content:'';position:absolute;left:-23px;top:6px;width:10px;height:10px;border-radius:50%;background:#9db3bf;border:2px solid #fff}
+.journey li.bad:before{background:#c0392b}.journey li.bad>.journey-head strong{color:#b4544b}
+.journey li.good:before{background:#2e9d62}.journey li.good>.journey-head strong{color:#25784b}
+.journey-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px}
+.journey-src{background:#f0f3f5;border-radius:4px;padding:1px 6px;font-size:10px;color:#6d818c}
+.shipment{margin:18px 0}.shipment h3{margin:0 0 10px}.journey-add{margin-top:10px;padding:14px;background:#fafbfc;border-radius:10px}
+.ticket-order{border:1px solid #e5ebef;border-radius:10px;padding:14px;margin-bottom:14px;background:#fff}
+.ticket-order>header{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:6px}
+.team-log{margin-top:14px;border-top:1px dashed #dbe3e8;padding-top:10px}
+.team-log form{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.team-log input{flex:1;min-width:180px;border:1px solid #dbe3e8;border-radius:7px;padding:9px 11px}
+.kind-badge{display:inline-block;border-radius:5px;padding:3px 7px;background:#fbeeee;color:#b15d5d;font-size:10px;margin-right:6px}
+.wait-badge{display:inline-block;border-radius:5px;padding:3px 7px;background:#fff5e5;color:#ad7937;font-size:10px}
+.support-msg.internal{align-self:stretch;max-width:100%;background:#fff8e7;border:1px dashed #e0b95a}
+.support-msg.internal em{font-size:10px;color:#8c641f;font-style:normal;font-weight:600}
+[data-theme="dark"] .journey li:before{border-color:#141c30}
+[data-theme="dark"] .journey-src{background:#1d2740;color:#9fb0c4}
+[data-theme="dark"] .journey-add,[data-theme="dark"] .ticket-order{background:#141c30;border-color:#28344d}
+[data-theme="dark"] .support-msg.internal{background:#2b2512;border-color:#7a6528}

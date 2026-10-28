@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { LayoutDashboard, Package, ShoppingBag, LogOut, Plus, ArrowUpRight, ChevronRight, Check, Menu, ShieldCheck, Wallet, Store, Search, BadgeCheck, Truck, Image, X, Percent, PackageCheck, BarChart3, PieChart, LifeBuoy, Settings as SettingsIcon, Eye, EyeOff, TrendingUp } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, LogOut, Plus, ArrowUpRight, ChevronRight, Check, Menu, ShieldCheck, Wallet, Store, Search, BadgeCheck, Truck, Image, X, Percent, PackageCheck, BarChart3, PieChart, LifeBuoy, Settings as SettingsIcon, Eye, EyeOff, TrendingUp, Bell, AlertTriangle } from 'lucide-react';
 import { api, money, paise, suggestCategory } from './api';
 import { Button, Field, PasswordField, Badge, Empty, Modal, Stat, ProductImage, CONDITION_LABEL } from './ui';
 import './style.css';
@@ -42,6 +42,19 @@ function App() {
   const [cancelOrderId, setCancelOrderId] = useState(null);
   const [holidayOpen, setHolidayOpen] = useState(false), [holidayDays, setHolidayDays] = useState(2);
   const [orderView, setOrderView] = useState(null), [hiddenPages, setHiddenPages] = useState([]);
+  const [notifs, setNotifs] = useState([]), [notifOpen, setNotifOpen] = useState(false), [problemsOnly, setProblemsOnly] = useState(false);
+  // Courier alerts (out for delivery, failed, returning, customer problem).
+  // Polled gently every minute; a missed poll is simply retried next time.
+  useEffect(() => {
+    if (!session) return;
+    const pull = () => { if (!document.hidden) api('/seller/notifications').then(setNotifs).catch(() => {}); };
+    pull();
+    const id = setInterval(pull, 60000);
+    return () => clearInterval(id);
+  }, [session]);
+  async function markNotifsRead() {
+    try { await api('/seller/notifications/read', { method: 'POST' }); setNotifs(list => list.map(n => n.readAt ? n : { ...n, readAt: new Date().toISOString() })); } catch (e) { setError(e.message); }
+  }
 
   function logout() { sessionStorage.removeItem('ntsa-token'); sessionStorage.removeItem('ntsa-page'); setSession(null); setMe(null); setModal(null); setError(''); }
   async function load() {
@@ -87,6 +100,14 @@ function App() {
   // Overview is always on; the admin can hide any of the rest from the Pages screen.
   const allNav = [['Overview', LayoutDashboard, 'overview'], ['My products', Package, 'products'], ['My orders', ShoppingBag, 'orders'], ['To pack', PackageCheck, 'topack'], ['Support', LifeBuoy, 'support'], ['Settings', SettingsIcon, 'settings']];
   const nav = allNav.filter(([, , key]) => key === 'overview' || !hiddenPages.includes(key));
+  const unreadCount = notifs.filter(n => !n.readAt).length;
+  // Jump to the order a notification is about, if it's one of this shop's lines.
+  function openNotif(n) {
+    setNotifOpen(false);
+    const line = orders.find(o => o.orderId === n.entityId);
+    if (line) { go('My orders'); setOrderView(line); }
+  }
+  const problemOrders = orders.filter(hasProblem);
   const openTickets = tickets.filter(t => t.status === 'OPEN').length;
   const shown = products.filter(p => `${p.name} ${p.category?.name}`.toLowerCase().includes(query.toLowerCase()));
   // Units sold per product (cancelled lines left out), so the list can show
@@ -111,6 +132,18 @@ function App() {
       <header className="topbar">
         <div className="breadcrumb"><button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileNav(!mobileNav)}><Menu/></button><span>Seller</span><ChevronRight size={14}/><strong>{page}</strong></div>
         <div className="account">
+          <div className="notif">
+            <button className="icon-button notif-bell" aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ''}`} onClick={() => setNotifOpen(!notifOpen)}><Bell size={18}/>{unreadCount > 0 && <span className="notif-count">{unreadCount > 9 ? '9+' : unreadCount}</span>}</button>
+            {notifOpen && <>
+              <div className="notif-backdrop" onClick={() => setNotifOpen(false)}/>
+              <div className="notif-panel" role="dialog" aria-label="Notifications">
+                <div className="notif-head"><strong>Notifications</strong>{unreadCount > 0 && <button className="text-button" onClick={markNotifsRead}>Mark all read</button>}</div>
+                <div className="notif-list">{notifs.length ? notifs.map(n => <button key={n.id} className={`notif-item ${n.readAt ? '' : 'unread'} ${BAD_EVENTS.includes(n.type) ? 'bad' : ''}`} onClick={() => openNotif(n)}>
+                  <strong>{n.title}</strong>{n.body && <p>{n.body}</p>}<small>{new Date(n.createdAt).toLocaleString('en-IN')}</small>
+                </button>) : <Empty text="No alerts yet"/>}</div>
+              </div>
+            </>}
+          </div>
           {(me?.gstVerified || me?.aadharVerified) && <span className="badge green"><BadgeCheck size={12}/> Verified</span>}
           <span className="online-dot"/><span>{me?.shopName || 'Your shop'}</span>
           <span className="avatar">{(me?.shopName || 'S').slice(0, 2).toUpperCase()}</span>
@@ -227,8 +260,8 @@ function App() {
           </section>}
 
           {page === 'My orders' && <section className="panel">
-            <div className="panel-heading"><div><h2>My orders <span className="count">{orders.length}</span></h2><p>Every line a buyer has ordered from your shop. Click one to track it. NTSA packs and delivers.</p></div><button className="text-button" onClick={load}>Refresh</button></div>
-            <OrderTable orders={orders} full onCancel={setCancelOrderId} onOpen={setOrderView}/>
+            <div className="panel-heading"><div><h2>My orders <span className="count">{orders.length}</span></h2><p>Every line a buyer has ordered from your shop. Click one to track it. NTSA packs and delivers.</p></div><div className="row-actions"><button className={`filter-toggle ${problemsOnly ? 'on' : ''}`} onClick={() => setProblemsOnly(!problemsOnly)}>Needs attention ({problemOrders.length})</button><button className="text-button" onClick={load}>Refresh</button></div></div>
+            <OrderTable orders={problemsOnly ? problemOrders : orders} full onCancel={setCancelOrderId} onOpen={setOrderView}/>
           </section>}
 
           {page === 'To pack' && <section className="panel">
@@ -282,7 +315,7 @@ function App() {
       </form>
     </Modal>}
     {orderView && <Modal title={`Order #${orderView.orderId.slice(-8).toUpperCase()}`} close={() => setOrderView(null)}>
-      <SellerOrderDetail order={orderView}/>
+      <SellerOrderDetail order={orders.find(o => o.id === orderView.id) || orderView} onSupport={() => { setOrderView(null); go('Support'); }}/>
     </Modal>}
   </div>;
 }
@@ -423,6 +456,17 @@ function StatusDonut({ orders }) {
     <div className="donut-legend">{entries.map(([st, n]) => <div key={st} className="legend-row"><span className="dot" style={{ background: COLORS[st] || '#9aa8b0' }}/>{st.charAt(0) + st.slice(1).toLowerCase().replace('_', ' ')}<strong>{n}</strong></div>)}</div>
   </div>;
 }
+// Courier trouble a seller should spot at a glance, from the journey events.
+const BAD_EVENTS = ['DELIVERY_FAILED', 'RTO_INITIATED', 'RTO_DELIVERED', 'ISSUE_REPORTED'];
+const ISSUE_LABEL = { NOT_RECEIVED: 'Not received', DAMAGED: 'Damaged', WRONG_ITEM: 'Wrong item', OTHER: 'Other' };
+const hasProblem = o => (o.openIssues?.length > 0) || (o.events || []).some(e => BAD_EVENTS.includes(e.status));
+function OrderChips({ order }) {
+  const has = s => (order.events || []).some(e => e.status === s);
+  return <>
+    {order.openIssues?.length > 0 && <span className="chip">Customer problem</span>}
+    {has('RTO_DELIVERED') ? <span className="chip">Returned to you</span> : has('RTO_INITIATED') ? <span className="chip">Being returned</span> : has('DELIVERY_FAILED') && !has('DELIVERED') && <span className="chip">Delivery failed</span>}
+  </>;
+}
 function OrderTable({ orders, full, onCancel, onOpen }) {
   return orders.length ? <div className="table-scroll"><table>
     <thead><tr><th>Item</th><th>Order</th>{full && <th>Customer</th>}<th>Qty</th><th>Order value</th>{full && <th>You earn</th>}<th>Status</th>{full && <th>Actions</th>}</tr></thead>
@@ -433,7 +477,7 @@ function OrderTable({ orders, full, onCancel, onOpen }) {
       <td>{o.quantity}</td>
       <td>{money(o.grossPaise ?? o.unitPaise * o.quantity)}{full && <small>{money(o.unitPaise)} each</small>}</td>
       {full && <td>{money(o.netPaise)}<small>{money(o.commissionPaise)} commission ({o.commissionPercent}%)</small></td>}
-      <td><Badge>{o.status}</Badge></td>
+      <td><Badge>{o.status}</Badge><OrderChips order={o}/>{full && o.trackingNumber && <small>{o.courierName ? `${o.courierName} · ` : ''}{o.trackingNumber}</small>}</td>
       {full && <td onClick={e => e.stopPropagation()}><div className="row-actions">{onOpen && <button onClick={() => onOpen(o)}>Track</button>}{onCancel && ['PENDING_PAYMENT', 'PLACED'].includes(o.status) && <button className="danger-text" onClick={() => onCancel(o.orderId)}>Cancel</button>}</div></td>}
     </tr>)}</tbody>
   </table></div> : <Empty text="Your first order will show up here"/>;
@@ -450,11 +494,31 @@ function OrderTracker({ order }) {
     <div><strong>{label}</strong>{s === 'DELIVERED' && order.deliveredAt ? <small>{order_fmt(order.deliveredAt)}</small> : i === idx && s === 'PLACED' ? <small>{order_fmt(order.placedAt)}</small> : null}</div>
   </div>)}</div>;
 }
-function SellerOrderDetail({ order }) {
+// Courier, tracking number and the parcel's journey so far, oldest first.
+function CourierJourney({ order }) {
+  const events = order.events || [];
+  if (!order.courierName && !order.trackingNumber && !events.length) return null;
+  return <>
+    {(order.courierName || order.trackingNumber) && <div className="courier-box">
+      {order.courierName && <div>Courier: <strong>{order.courierName}</strong></div>}
+      {order.trackingNumber && <div>Tracking number: <code>{order.trackingNumber}</code>{order.trackingUrl && <> · <a href={order.trackingUrl} target="_blank" rel="noopener noreferrer">Track on courier site</a></>}</div>}
+    </div>}
+    {events.length > 0 && <div className="order-track">{events.map((e, i) => <div key={e.id} className={`track-step done ${BAD_EVENTS.includes(e.status) ? 'bad' : ''} ${i === events.length - 1 ? 'current' : ''}`}>
+      <span className="track-dot">{e.status === 'DELIVERED' ? <Check size={12}/> : BAD_EVENTS.includes(e.status) ? <AlertTriangle size={12}/> : null}</span>
+      <div><strong>{e.title}</strong><small>{[e.location, new Date(e.occurredAt).toLocaleString('en-IN')].filter(Boolean).join(' · ')}</small></div>
+    </div>)}</div>}
+  </>;
+}
+function SellerOrderDetail({ order, onSupport }) {
   return <div className="editor">
     <div className="product-cell" style={{ marginBottom: 14 }}>{order.image ? <img className="product-image" src={order.image} alt=""/> : <div className="product-image placeholder"><Package/></div>}<div><strong>{order.name}</strong>{(order.size || order.color || order.grade) && <small>{[order.size, order.color, order.grade].filter(Boolean).join(' · ')}</small>}<small>Order #{order.orderId.slice(-8).toUpperCase()} · {order.quantity} pc</small></div></div>
     {(order.deliveryPartner || order.expectedDeliveryAt) && order.status !== 'CANCELLED' && <p className="muted" style={{ marginTop: 0 }}>{order.deliveryPartner && <>Delivery partner: <strong>{order.deliveryPartner}</strong></>}{order.deliveryPartner && order.expectedDeliveryAt && ' · '}{order.expectedDeliveryAt && order.status !== 'DELIVERED' && <>Expected by <strong>{new Date(order.expectedDeliveryAt).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</strong></>}</p>}
-    <OrderTracker order={order}/>
+    {order.openIssues?.length > 0 && <div className="issue-box">
+      <strong><AlertTriangle size={14} style={{ verticalAlign: -2 }}/> Customer reported a problem: {order.openIssues.map(i => ISSUE_LABEL[i.kind] || i.kind).join(', ')}</strong>
+      <p>NTSA support is handling this with the courier. If you need to add anything, <button onClick={onSupport}>contact support from the Support page</button>.</p>
+    </div>}
+    <CourierJourney order={order}/>
+    {!(order.events?.length) && <OrderTracker order={order}/>}
     <div className="settle-row"><span>Order value</span><strong>{money(order.grossPaise ?? order.unitPaise * order.quantity)}</strong></div>
     <div className="settle-row"><span>NTSA commission ({order.commissionPercent}%)</span><strong>−{money(order.commissionPaise)}</strong></div>
     <div className="settle-row"><span>You earn</span><strong>{money(order.netPaise)}</strong></div>

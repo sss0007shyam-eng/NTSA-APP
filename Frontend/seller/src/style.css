@@ -107,3 +107,28 @@
 .track-step strong{display:block;font-size:13px;color:#173442}
 .track-step:not(.done) strong{color:#9aa7b0}
 .track-step small{color:#8b9aa3;font-size:11px}
+
+.notif{position:relative}
+.notif-bell{position:relative;width:36px;height:36px;border-radius:50%;background:#f1f5f7;color:#43728a}
+.notif-count{position:absolute;top:-3px;right:-3px;min-width:17px;height:17px;border-radius:9px;background:#c0392b;color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center;padding:0 4px}
+.notif-backdrop{position:fixed;inset:0;z-index:40}
+.notif-panel{position:absolute;right:0;top:46px;width:360px;max-width:calc(100vw - 32px);background:#fff;border:1px solid #e5ebef;border-radius:12px;box-shadow:0 14px 40px #06233333;z-index:41;overflow:hidden}
+.notif-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #edf1f3}
+.notif-list{max-height:420px;overflow-y:auto}
+.notif-item{display:block;width:100%;text-align:left;border:0;background:#fff;padding:13px 16px;border-bottom:1px solid #f2f4f6}
+.notif-item.unread{background:#fff8ee}
+.notif-item strong{display:block;font-size:12px;color:#173442}
+.notif-item p{font-size:11px;line-height:1.5;color:#6f7f88;margin-top:3px}
+.notif-item small{font-size:10px;margin-top:3px}
+.notif-item.bad strong{color:#b4544b}
+.chip{display:inline-block;border-radius:5px;padding:3px 7px;font-size:9px;font-weight:650;white-space:nowrap;margin:4px 4px 0 0;background:#fbeeee;color:#b4544b}
+.filter-toggle{border:1px solid #e1e8ed;background:#fff;color:#43728a;border-radius:7px;padding:8px 12px;font-size:11px}
+.filter-toggle.on{background:#fbeeee;border-color:#f0d2cc;color:#b4544b}
+.courier-box{border:1px solid #e5ebef;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12px}
+.courier-box code{user-select:all;background:#f1f5f7;border-radius:4px;padding:2px 6px}
+.issue-box{background:#fff0ed;border:1px solid #f4d2c9;color:#a44e3e;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12px}
+.issue-box p{font-size:12px;margin-top:6px;line-height:1.6}
+.issue-box button{border:0;background:none;color:#a44e3e;text-decoration:underline;padding:0;font-size:12px}
+.track-step.bad .track-dot{background:#c0392b}
+.track-step.bad.done:not(:last-child)::before{background:#e1e8ed}
+.track-step.bad strong{color:#b4544b}

@@ -86,7 +86,7 @@ async function tellEveryone({ order, status, moved, anomaly, title }) {
   for (const audience of STAFF_ALERT[status] || []) jobs.push(note(audience, 'DELIVERY_UPDATE', `${title}: order ${short(order.id)}`, `${order.courierName ? `${order.courierName} ` : ''}${order.trackingNumber ? `AWB ${order.trackingNumber}. ` : ''}Check the order and contact the delivery team if needed.`));
   if (anomaly) jobs.push(note('ADMIN', 'DELIVERY_ANOMALY', `Check order ${short(order.id)}`, `For order ${short(order.id)}: ${anomaly}.`));
   if (SELLER_ALERT.has(status)) {
-    for (const sellerId of new Set(order.items.map(i => i.sellerId).filter(Boolean))) jobs.push(note(`SELLER:${sellerId}`, 'DELIVERY_UPDATE', `${title}: order ${short(order.id)}`, `Your item(s) in order ${short(order.id)}: ${title.toLowerCase()}.`));
+    for (const sellerId of new Set(order.items.map(i => i.sellerId).filter(Boolean))) jobs.push(note(`SELLER:${sellerId}`, status, `${title}: order ${short(order.id)}`, `Your item(s) in order ${short(order.id)}: ${title.toLowerCase()}.`));
   }
   await Promise.all(jobs);
 }

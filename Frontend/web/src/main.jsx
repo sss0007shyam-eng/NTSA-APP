@@ -7,6 +7,7 @@ import { Button, Field, PasswordField, Badge, Empty, Modal, Stat, ProductImage, 
 import { WholesaleProductsPage, AudienceField } from './pages/wholesale-products';
 import { OverviewPage } from './pages/dashboard';
 import { LateOrdersBanner, LateOrdersPanel } from './pages/late-orders';
+import { ShipmentSection, TicketOrderCard, KIND_LABEL } from './pages/shipment';
 import { CustomersPage } from './pages/customers';
 import { ReviewsPage } from './pages/reviews';
 import { SellerInsightsPage } from './pages/seller-insights';
@@ -258,7 +259,7 @@ function App() {
           {page === 'Customers' && <CustomersPage customers={customers} query={query} setQuery={setQuery} busy={busy} onBlock={(c, blocked) => action(() => api(`/admin/customers/${c.id}`, { method: 'PATCH', body: { blocked } }), blocked ? `${c.name || 'Customer'} blocked` : `${c.name || 'Customer'} unblocked`)}/>}
           {page === 'Seller insights' && <SellerInsightsPage insights={insights} query={query} setQuery={setQuery} openSellerDashboard={openSellerDashboard}/>}
           {page === 'Product label' && <ProductLabelPage sellers={sellers} settings={settings} query={query} setQuery={setQuery} busy={busy} onToggleSeller={(s, watermark) => action(() => api(`/admin/sellers/${s.id}`, { method: 'PATCH', body: { watermark } }), `${s.shopName}: logo ${watermark ? 'on' : 'off'}`)} onToggleOwn={watermark => action(() => api('/admin/settings', { method: 'PUT', body: { companyName: settings.companyName, companyAddress: settings.companyAddress || '', companyGSTIN: settings.companyGSTIN || null, companyPhone: settings.companyPhone || null, companyEmail: settings.companyEmail || null, logoUrl: settings.logoUrl || null, invoiceTerms: settings.invoiceTerms || null, invoiceBankDetails: settings.invoiceBankDetails || null, invoiceColumns: settings.invoiceColumns || null, watermarkOwn: watermark } }), `NTSA own stock: logo ${watermark ? 'on' : 'off'}`)}/>}
-          {(page === 'Tickets' || page === 'Support') && <SupportTicketsPage tickets={tickets} query={query} setQuery={setQuery} busy={busy} onReply={(t, body, done) => action(async () => { await api(`/support/tickets/${t.id}/message`, { method: 'POST', body: { body } }); done(); })} onResolve={t => action(() => api(`/support/tickets/${t.id}/resolve`, { method: 'POST' }), 'Ticket resolved')} onReopen={t => action(() => api(`/support/tickets/${t.id}/reopen`, { method: 'POST' }), 'Ticket reopened')}/>}
+          {(page === 'Tickets' || page === 'Support') && <SupportTicketsPage tickets={tickets} query={query} setQuery={setQuery} busy={busy} onReply={(t, body, done) => action(async () => { await api(`/support/tickets/${t.id}/message`, { method: 'POST', body: { body } }); done(); })} onResolve={t => action(() => api(`/support/tickets/${t.id}/resolve`, { method: 'POST' }), 'Ticket resolved')} onReopen={t => action(() => api(`/support/tickets/${t.id}/reopen`, { method: 'POST' }), 'Ticket reopened')} onDeliveryTeam={(t, direction, body, done) => action(async () => { await api(`/support/tickets/${t.id}/delivery-team`, { method: 'POST', body: { direction, body } }); done(); }, direction === 'SENT' ? 'Logged: asked the delivery team' : 'Logged: delivery team replied')}/>}
           {isSupport && page === 'Seller products' && <SupportProductsPage sellers={supportSellers} products={supportProducts} query={query} setQuery={setQuery} busy={busy}
             onHide={p => action(() => api(`/support/products/${p.id}/hide`, { method: 'POST' }), `${p.name} hidden`)}
             onRestore={p => action(() => api(`/support/products/${p.id}/restore`, { method: 'POST' }), `${p.name} back on sale`)}
@@ -619,16 +620,17 @@ function ProductLabelPage({ sellers, settings, query, setQuery, busy, onToggleSe
 }
 // Support workspace: the ticket inbox. Sellers raise tickets, admins flag
 // products -- support replies, resolves, and reopens them here.
-function SupportTicketsPage({ tickets, query, setQuery, busy, onReply, onResolve, onReopen }) {
+function SupportTicketsPage({ tickets, query, setQuery, busy, onReply, onResolve, onReopen, onDeliveryTeam }) {
   const [openId, setOpenId] = useState(null);
   const [filter, setFilter] = useState('OPEN');
   const q = query.toLowerCase();
   const shown = tickets.filter(t => (filter === 'ALL' || t.status === filter)
-    && (t.subject.toLowerCase().includes(q) || (t.seller?.shopName || '').toLowerCase().includes(q)));
+    && (t.subject.toLowerCase().includes(q) || (t.seller?.shopName || '').toLowerCase().includes(q) || (t.user?.name || '').toLowerCase().includes(q) || (t.user?.phone || '').includes(q)));
   const openCount = tickets.filter(t => t.status === 'OPEN').length;
+  const waitingCount = tickets.filter(t => t.status === 'OPEN' && t.awaitingDeliveryTeam).length;
   return <section className="panel">
     <div className="panel-heading">
-      <div><h2>Support tickets <span className="count">{openCount} open</span></h2><p>Seller requests and products flagged for review. Reply to the raiser, then resolve.</p></div>
+      <div><h2>Support tickets <span className="count">{openCount} open</span>{waitingCount > 0 && <span className="count" style={{ background: '#fff5e5', color: '#ad7937' }}>{waitingCount} waiting on delivery team</span>}</h2><p>Seller requests and products flagged for review. Reply to the raiser, then resolve.</p></div>
       <div className="search"><Search size={17}/><input aria-label="Search tickets" placeholder="Search subject or shop…" value={query} onChange={e => setQuery(e.target.value)}/></div>
     </div>
     <div className="order-filters"><div className="tabs" style={{ margin: 0, width: 'auto' }}>{[['OPEN', 'Open'], ['RESOLVED', 'Resolved'], ['ALL', 'All']].map(([v, label]) => <button key={v} type="button" className={filter === v ? 'selected' : ''} onClick={() => setFilter(v)}>{label}</button>)}</div></div>
@@ -637,25 +639,27 @@ function SupportTicketsPage({ tickets, query, setQuery, busy, onReply, onResolve
       <tbody>
         {shown.map(t => <React.Fragment key={t.id}>
           <tr>
-            <td><strong>{t.subject}</strong>{t.productId && <small>Flagged product</small>}</td>
-            <td>{t.raisedByRole === 'SELLER' ? (t.seller?.shopName || 'Seller') : 'Admin'}{t.rating ? <small>Rated {'★'.repeat(t.rating)}</small> : null}</td>
+            <td>{t.kind && t.kind !== 'GENERAL' && <span className="kind-badge">{KIND_LABEL[t.kind] || t.kind}</span>}<strong>{t.subject}</strong>{t.productId && <small>Flagged product</small>}{t.orderId && <small>Order #{t.orderId.slice(-8).toUpperCase()}</small>}{t.awaitingDeliveryTeam && <span className="wait-badge">Waiting on delivery team</span>}</td>
+            <td>{t.raisedByRole === 'CUSTOMER' ? <>{t.user?.name || 'Customer'}<small>Customer{t.user?.phone ? ` · ${t.user.phone}` : ''}</small></> : t.raisedByRole === 'SELLER' ? (t.seller?.shopName || 'Seller') : 'Admin'}{t.rating ? <small>Rated {'★'.repeat(t.rating)}</small> : null}</td>
             <td><Badge>{t.status === 'OPEN' ? 'Open' : 'Resolved'}</Badge></td>
             <td><small>{new Date(t.updatedAt).toLocaleString('en-IN')}</small></td>
             <td><button className="text-button" onClick={() => setOpenId(openId === t.id ? null : t.id)}>{openId === t.id ? 'Hide' : 'Open'} <ChevronRight size={14}/></button></td>
           </tr>
-          {openId === t.id && <tr className="ticket-thread-row"><td colSpan={5}><SupportThread ticket={t} busy={busy} onReply={onReply} onResolve={onResolve} onReopen={onReopen}/></td></tr>}
+          {openId === t.id && <tr className="ticket-thread-row"><td colSpan={5}><SupportThread ticket={t} busy={busy} onReply={onReply} onResolve={onResolve} onReopen={onReopen} onDeliveryTeam={onDeliveryTeam}/></td></tr>}
         </React.Fragment>)}
       </tbody>
     </table></div>
     {!shown.length && <Empty text="No tickets here"/>}
   </section>;
 }
-function SupportThread({ ticket, busy, onReply, onResolve, onReopen }) {
+function SupportThread({ ticket, busy, onReply, onResolve, onReopen, onDeliveryTeam }) {
   const [text, setText] = useState('');
   const msgs = ticket.messages || [];
   return <div className="support-thread">
+    {ticket.orderId && <TicketOrderCard ticket={ticket} busy={busy} onDeliveryTeam={onDeliveryTeam}/>}
     <div className="support-messages">
-      {msgs.map((m, i) => <div key={i} className={`support-msg ${m.sender === 'SELLER' ? 'from-seller' : 'from-support'}`}>
+      {msgs.map((m, i) => <div key={i} className={`support-msg ${m.internal ? 'internal' : (m.sender === 'SELLER' || m.sender === 'CUSTOMER') ? 'from-seller' : 'from-support'}`}>
+        {m.internal && <em>Internal - customer cannot see this</em>}
         <div className="support-msg-head"><strong>{m.name || m.sender}</strong><small>{new Date(m.at).toLocaleString('en-IN')}</small></div>
         <p>{m.body}</p>
       </div>)}
@@ -1277,6 +1281,7 @@ function OrderDetails({ order, admin, busy, action, next, onCancel, onSetDeliver
         </form>
       : <p><button className="text-button" style={{ display: 'inline', padding: 0 }} onClick={() => setEditingDelivery(true)}>{order.deliveryPartner || order.expectedDeliveryAt ? 'Edit delivery partner / ETA' : 'Set delivery partner / ETA'}</button></p>)}
     {admin && next[order.status] && <Button disabled={busy} onClick={() => action(() => api(`/admin/orders/${order.id}/status`, { method: 'PATCH', body: { status: next[order.status] } }))}>Mark {next[order.status].toLowerCase().replaceAll('_', ' ')}</Button>}
+    {order.status !== 'PENDING_PAYMENT' && <ShipmentSection order={order} canEdit={admin} canDeliver={admin} busy={busy} action={action}/>}
     {admin && order.status === 'OUT_FOR_DELIVERY' && <form onSubmit={e => { e.preventDefault(); action(() => api(`/admin/orders/${order.id}/deliver`, { method: 'POST', body: { otp } })); }}><Field label="Recipient's delivery OTP" value={otp} onChange={e => setOtp(e.target.value)} pattern="[0-9]{6}" maxLength={6} required/><Button disabled={busy}>Verify and confirm delivery</Button></form>}
     {order.status === 'CANCELLED' && <p className="danger-text"><strong>Cancelled{order.cancelledBy ? ` by ${order.cancelledBy.toLowerCase()}` : ''}.</strong>{order.cancelReason ? ` ${order.cancelReason}` : ''} Stock has been put back.</p>}
     {cancellable && (cancelling
