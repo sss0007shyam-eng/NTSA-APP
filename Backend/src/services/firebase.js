@@ -16,3 +16,10 @@ export async function notifyOrder(user, order) {
   try { await getMessaging(app()).send({ token: user.fcmToken, notification: { title: 'NTSA order update', body: `Your order is ${order.status.toLowerCase().replaceAll('_', ' ')}` }, data: { orderId: order.id } }); }
   catch { console.warn('FCM notification failed for order', order.id); }
 }
+/// A push to one customer's phone, with whatever text the caller wants. Never
+/// throws: a missed push must not undo the order update that caused it.
+export async function pushToUser(user, { title, body, data = {} }) {
+  if (!user?.fcmToken || !process.env.FIREBASE_PROJECT_ID) return;
+  try { await getMessaging(app()).send({ token: user.fcmToken, notification: { title, body }, data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])) }); }
+  catch { console.warn('FCM notification failed for user', user.id); }
+}

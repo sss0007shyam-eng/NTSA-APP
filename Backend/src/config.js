@@ -5,6 +5,9 @@ export const config = z.object({
   PORT: z.coerce.number().default(4000), DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32), CORS_ORIGIN: z.string().default('http://localhost:5173'),
   DEMO_MODE: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
+  // Shared secret the courier (or aggregator) sends with every tracking webhook.
+  // Unset = the webhook is switched off.
+  COURIER_WEBHOOK_SECRET: z.string().min(16).optional(),
 }).parse(process.env);
 if (config.NODE_ENV === 'production' && (config.DEMO_MODE || config.JWT_SECRET.includes('replace-this'))) {
   throw new Error('Production requires a private JWT secret and DEMO_MODE=false');

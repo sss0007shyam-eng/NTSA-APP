@@ -11,12 +11,14 @@ import { notifyOrder } from './firebase.js';
 // they're looking at, and what it actually looks like. The product itself
 // might since be edited or removed; this is a live join, not a snapshot,
 // so a since-changed photo is what shows (same as the name already works).
-export const orderInclude = { items: { include: { refund: true, seller: { select: { shopName: true } }, product: { select: { images: true, hsn: true, attributes: true } } } } };
+export const orderInclude = { items: { include: { refund: true, seller: { select: { shopName: true } }, product: { select: { images: true, hsn: true, attributes: true } } } }, events: { orderBy: { occurredAt: 'asc' } } };
 export const ownerWhere = actor => actor.role === 'ADMIN' ? {} : actor.role === 'CUSTOMER' ? { userId: actor.id } : { vendorId: actor.id };
 export function publicOrder(order) {
   const { deliveryOtpHash, deliveryOtpExpiresAt, deliveryOtpAttempts, ...safe } = order;
   safe.items = safe.items.map(({ product, seller, ...item }) => ({ ...item, image: product?.images?.[0] ?? null, sellerName: seller?.shopName ?? null, refundEligible: eligible(item, order) }));
   safe.refundEligible = safe.items.some(item => item.refundEligible);
+  // The journey, without the webhook bookkeeping.
+  safe.events = (order.events || []).map(({ id, status, title, location, note, source, occurredAt }) => ({ id, status, title, location, note, source, occurredAt }));
   return safe;
 }
 export async function ownedOrder(actor, id, client = db) {
@@ -177,6 +179,8 @@ export async function changeStatus(id, status) {
       requireThat(pending.length === 0, 400, `Waiting on ${pending.join(', ')} to pack their item${pending.length > 1 ? 's' : ''} first`);
       await tx.orderItem.updateMany({ where: { orderId: id, sellerId: null, packedAt: null }, data: { packedAt: new Date() } });
     }
+    const label = { PACKED: 'Packed and ready to ship', SHIPPED: 'Shipped', OUT_FOR_DELIVERY: 'Out for delivery' }[status];
+    await tx.shipmentEvent.create({ data: { orderId: id, status: status === 'PACKED' ? 'UPDATE' : status === 'SHIPPED' ? 'PICKED_UP' : status, title: label, source: 'ADMIN', occurredAt: new Date() } });
     return tx.order.update({ where: { id }, data: { status }, include: orderInclude });
   });
   await notifyOrder(order.userId && await db.user.findUnique({ where: { id: order.userId } }), order);
@@ -193,6 +197,13 @@ export async function deliveryCode(actor, id) {
   });
   return { otp, expiresInSeconds: 900 };
 }
+/// Closes the order as delivered -- starts each line's refund window and clears
+/// the OTP. Used when the recipient's OTP is confirmed and when the courier
+/// reports delivery.
+export async function markDelivered(tx, order, deliveredAt = new Date()) {
+  for (const item of order.items) await tx.orderItem.update({ where: { id: item.id }, data: { refundExpiresAt: deadline(deliveredAt, item.refundWindowHours), refundEligible: item.refundWindowHours > 0 } });
+  return tx.order.update({ where: { id: order.id }, data: { status: 'DELIVERED', deliveredAt, refundEligible: order.items.some(i => i.refundWindowHours > 0), deliveryOtpHash: null, deliveryOtpExpiresAt: null }, include: orderInclude });
+}
 export async function deliver(id, otp) {
   const result = await atomic(async tx => {
     const order = await tx.order.findUnique({ where: { id }, include: orderInclude });
@@ -202,9 +213,8 @@ export async function deliver(id, otp) {
       await tx.order.update({ where: { id }, data: { deliveryOtpAttempts: { increment: 1 } } });
       return null;
     }
-    const deliveredAt = new Date();
-    for (const item of order.items) await tx.orderItem.update({ where: { id: item.id }, data: { refundExpiresAt: deadline(deliveredAt, item.refundWindowHours), refundEligible: item.refundWindowHours > 0 } });
-    return tx.order.update({ where: { id }, data: { status: 'DELIVERED', deliveredAt, refundEligible: order.items.some(i => i.refundWindowHours > 0), deliveryOtpHash: null, deliveryOtpExpiresAt: null }, include: orderInclude });
+    await tx.shipmentEvent.create({ data: { orderId: id, status: 'DELIVERED', title: 'Delivered (OTP confirmed)', source: 'ADMIN', occurredAt: new Date() } });
+    return markDelivered(tx, order);
   });
   requireThat(result, 400, 'Incorrect delivery OTP');
   await notifyOrder(result.userId && await db.user.findUnique({ where: { id: result.userId } }), result);

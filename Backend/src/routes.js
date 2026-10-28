@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import multer from 'multer';
-import { randomInt } from 'node:crypto';
+import { randomInt, timingSafeEqual } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { db, atomic } from './db.js';
 import { config } from './config.js';
@@ -11,7 +11,8 @@ import { requireThat, holidayGraceCutoff, HttpError } from './lib/rules.js';
 import { rankByImage, visualSearchEnabled } from './services/visualSearch.js';
 import { variantFor, priceFor, publicSizePrices } from './lib/variants.js';
 import { auth, roles, tokenFor } from './services/auth.js';
-import { verifyCustomer } from './services/firebase.js';
+import { verifyCustomer, pushToUser } from './services/firebase.js';
+import { recordShipmentEvent, normalizeStatus } from './services/shipping.js';
 import { uploadImage, uploadAttachment } from './services/storage.js';
 import { gateway, validSignature } from './services/payments.js';
 import { checkout, ownedOrder, publicOrder, orderInclude, ownerWhere, changeStatus, cancelOrder, CANCELLABLE_BY_BUYER, deliveryCode, deliver, requestRefund, reviewRefund, assertDeliverable } from './services/orders.js';
@@ -153,6 +154,31 @@ router.get('/coupons', async (req, res) => res.json(await db.coupon.findMany({ w
 // The app shows the delivery charge in the cart before checkout; the server
 // works it out again when the order is placed.
 router.get('/delivery-rules', async (req, res) => res.json(await db.deliveryRule.findMany({ orderBy: { belowPaise: 'asc' }, select: { id: true, belowPaise: true, chargePaise: true } })));
+// Tracking webhook for the courier (or an aggregator like Shiprocket). It sits
+// above `router.use(auth)` because the courier has no login -- it proves itself
+// with a shared secret instead. Whatever shape their payload has, a thin adapter
+// maps it to { awb, status, location, remarks, timestamp } and posts it here.
+// Unknown AWBs get a 202 so the courier doesn't retry forever.
+router.post('/webhooks/courier', async (req, res) => {
+  const secret = config.COURIER_WEBHOOK_SECRET;
+  requireThat(secret, 404, 'Not found');
+  const given = Buffer.from(String(req.get('x-webhook-secret') || ''));
+  requireThat(given.length === Buffer.byteLength(secret) && timingSafeEqual(given, Buffer.from(secret)), 401, 'Invalid webhook secret');
+  const body = z.object({
+    awb: z.string().trim().min(1).max(60), status: z.string().trim().min(1).max(200),
+    location: z.string().trim().max(200).nullish(), remarks: z.string().trim().max(500).nullish(),
+    timestamp: z.string().max(40).nullish(), courier: z.string().trim().max(80).nullish(),
+  }).parse(req.body);
+  const order = await db.order.findFirst({ where: { trackingNumber: body.awb }, orderBy: { createdAt: 'desc' }, select: { id: true, courierName: true } });
+  if (!order) { console.warn('Courier webhook for an unknown AWB', body.awb); return res.status(202).json({ ok: true, matched: false }); }
+  const status = normalizeStatus(body.status);
+  const when = body.timestamp && !Number.isNaN(Date.parse(body.timestamp)) ? new Date(body.timestamp) : new Date();
+  const result = await recordShipmentEvent({
+    orderId: order.id, status, title: status === 'UPDATE' ? body.status : undefined, location: body.location, note: body.remarks,
+    source: 'COURIER', actorName: body.courier || order.courierName, occurredAt: when, dedupeKey: `${body.awb}:${body.status}:${when.toISOString()}`,
+  });
+  res.json({ ok: true, matched: true, duplicate: result.duplicate });
+});
 router.use(auth);
 router.get('/me', async (req, res) => {
   const { passwordHash, sessionVersion, ...account } = req.actor.account;
@@ -401,6 +427,7 @@ router.get('/admin/late-orders', async (req, res) => {
       include: {
         user: { select: { name: true, phone: true } }, vendor: { select: { name: true, phone: true } },
         items: { select: { id: true, name: true, quantity: true, packedAt: true, sellerId: true, seller: { select: { id: true, shopName: true, ownerName: true, phone: true } } } },
+        events: { orderBy: { occurredAt: 'desc' }, take: 1, select: { title: true, location: true, occurredAt: true } },
       },
     }),
     getSettings(),
@@ -414,6 +441,7 @@ router.get('/admin/late-orders', async (req, res) => {
       return {
         id: o.id, status: o.status, totalPaise: o.totalPaise, paymentMethod: o.paymentMethod, createdAt: o.createdAt,
         dueAt, hoursLate: Math.floor(lateMs / 3600000), daysLate: Math.floor(lateMs / DAY), deliveryPartner: o.deliveryPartner,
+        courierName: o.courierName, trackingNumber: o.trackingNumber, trackingUrl: o.trackingUrl, lastEvent: o.events[0] ?? null,
         customer: { name: o.address?.name || o.user?.name || o.vendor?.name || 'Customer', phone: o.address?.phone || o.user?.phone || o.vendor?.phone || null, city: o.address?.city || null },
         sellers,
         unpackedCount: o.items.filter(i => i.sellerId && !i.packedAt).length,
@@ -687,14 +715,137 @@ router.post('/admin/products/:id/report', async (req, res) => {
   await notify('SUPPORT', 'SUPPORT_TICKET', 'Admin flagged a product', `${product.name}: ${note}`, ticket.id);
   res.status(201).json(ticket);
 });
+// ---------- A customer's order problems, and the support chat about them ----------
+const ISSUE_TITLES = { NOT_RECEIVED: 'Not received', DAMAGED: 'Arrived damaged', WRONG_ITEM: 'Wrong item received', OTHER: 'Other problem' };
+const REPORT_WINDOW_DAYS = 14;
+// What the customer may read of a ticket: the staff-only notes about what the
+// delivery team said stay out.
+const publicTicket = t => ({
+  id: t.id, kind: t.kind, subject: t.subject, status: t.status, orderId: t.orderId, rating: t.rating, createdAt: t.createdAt, updatedAt: t.updatedAt,
+  messages: (t.messages || []).filter(m => !m.internal).map(({ sender, name, body, at }) => ({ sender, name, body, at })),
+  order: t.order ? { id: t.order.id, status: t.order.status, courierName: t.order.courierName, trackingNumber: t.order.trackingNumber, trackingUrl: t.order.trackingUrl } : null,
+});
+const ticketInclude = { order: { select: { id: true, status: true, courierName: true, trackingNumber: true, trackingUrl: true } } };
+// "I didn't get it / it came broken": opens (or adds to) one support request for
+// the order. Support gets the order, courier and timeline beside it; the seller
+// sees a "problem reported" step on their copy of the order.
+router.post('/orders/:id/report-issue', customer, async (req, res) => {
+  const { kind, message } = z.object({ kind: z.enum(['NOT_RECEIVED', 'DAMAGED', 'WRONG_ITEM', 'OTHER']), message: z.string().trim().min(3).max(1000) }).parse(req.body);
+  const order = await ownedOrder(req.actor, req.params.id);
+  const sent = ['SHIPPED', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(order.status);
+  requireThat(kind === 'OTHER' ? !['PENDING_PAYMENT', 'CANCELLED'].includes(order.status) : kind === 'NOT_RECEIVED' ? sent : order.status === 'DELIVERED', 400,
+    kind === 'NOT_RECEIVED' ? 'This order has not been shipped yet' : kind === 'OTHER' ? 'This order cannot be reported' : 'You can report this once the order is delivered');
+  requireThat(!order.deliveredAt || Date.now() - order.deliveredAt.getTime() <= REPORT_WINDOW_DAYS * 86400000, 400, `This order was delivered more than ${REPORT_WINDOW_DAYS} days ago. Please contact support.`);
+  const name = order.address?.name || req.actor.account.name || 'Customer';
+  const ref = `order #${order.id.slice(0, 10).toUpperCase()}`;
+  const entry = { sender: 'CUSTOMER', name, body: message, at: new Date().toISOString() };
+  const open = await db.supportTicket.findFirst({ where: { orderId: order.id, userId: req.actor.id, kind, status: 'OPEN' } });
+  if (open) {
+    const t = await db.supportTicket.update({ where: { id: open.id }, data: { messages: [...(open.messages || []), entry] }, include: ticketInclude });
+    await notify('SUPPORT', 'SUPPORT_TICKET', 'New message on an order problem', `${name}: ${ISSUE_TITLES[kind]} (${ref})`, t.id);
+    return res.json(publicTicket(t));
+  }
+  const ticket = await db.supportTicket.create({
+    data: { userId: req.actor.id, orderId: order.id, kind, raisedByRole: 'CUSTOMER', subject: `${ref.replace('order', 'Order')}: ${ISSUE_TITLES[kind]}`, messages: [entry] }, include: ticketInclude,
+  });
+  await recordShipmentEvent({ orderId: order.id, status: 'ISSUE_REPORTED', title: `Customer reported: ${ISSUE_TITLES[kind].toLowerCase()}`, source: 'CUSTOMER', actorName: name });
+  await notify('SUPPORT', 'SUPPORT_TICKET', 'Order problem reported', `${name}: ${ISSUE_TITLES[kind]} (${ref})`, ticket.id);
+  res.status(201).json(publicTicket(ticket));
+});
+router.get('/tickets', customer, async (req, res) => res.json((await db.supportTicket.findMany({ where: { userId: req.actor.id }, include: ticketInclude, orderBy: { updatedAt: 'desc' }, take: 100 })).map(publicTicket)));
+router.get('/tickets/:id', customer, async (req, res) => {
+  const ticket = await db.supportTicket.findFirst({ where: { id: req.params.id, userId: req.actor.id }, include: ticketInclude });
+  requireThat(ticket, 404, 'Ticket not found');
+  res.json(publicTicket(ticket));
+});
+router.post('/tickets/:id/message', customer, async (req, res) => {
+  const { body } = z.object({ body: z.string().trim().min(1).max(2000) }).parse(req.body);
+  const ticket = await db.supportTicket.findFirst({ where: { id: req.params.id, userId: req.actor.id } });
+  requireThat(ticket, 404, 'Ticket not found');
+  const messages = [...(ticket.messages || []), { sender: 'CUSTOMER', name: req.actor.account.name || 'Customer', body, at: new Date().toISOString() }];
+  const updated = await db.supportTicket.update({ where: { id: ticket.id }, data: { messages, status: 'OPEN' }, include: ticketInclude });
+  await notify('SUPPORT', 'SUPPORT_TICKET', 'New reply on an order problem', `${req.actor.account.name || 'Customer'} replied: ${ticket.subject}`, ticket.id);
+  res.json(publicTicket(updated));
+});
 // ---------- Support team panel (ADMIN + SUPPORT) ----------
-router.get('/support/tickets', support, async (req, res) => res.json(await db.supportTicket.findMany({ include: { seller: { select: { shopName: true } } }, orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }], take: 300 })));
+router.get('/support/tickets', support, async (req, res) => res.json(await db.supportTicket.findMany({
+  include: {
+    seller: { select: { shopName: true } }, user: { select: { name: true, phone: true } },
+    order: { select: { id: true, status: true, courierName: true, trackingNumber: true, trackingUrl: true, deliveryPartner: true, expectedDeliveryAt: true } },
+  },
+  orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }], take: 300,
+})));
+// Everything support needs about one order in one place: who ordered it, whose
+// products, which courier and AWB, the whole journey so far, and who to call --
+// the delivery team, the customer, the sellers.
+router.get('/support/orders/:id', support, async (req, res) => {
+  const [order, settings] = await Promise.all([
+    db.order.findUnique({
+      where: { id: req.params.id },
+      include: {
+        user: { select: { name: true, phone: true } }, vendor: { select: { name: true, phone: true } }, events: { orderBy: { occurredAt: 'asc' } },
+        items: { include: { seller: { select: { id: true, shopName: true, ownerName: true, phone: true } } } },
+        tickets: { select: { id: true, kind: true, status: true, subject: true, awaitingDeliveryTeam: true }, orderBy: { createdAt: 'desc' } },
+      },
+    }),
+    getSettings(),
+  ]);
+  requireThat(order, 404, 'Order not found');
+  const { user, vendor, items, deliveryOtpHash, deliveryOtpExpiresAt, deliveryOtpAttempts, ...rest } = order;
+  res.json({
+    ...rest, deliveryTeamPhone: settings?.deliveryTeamPhone ?? null,
+    customer: { name: order.address?.name || user?.name || vendor?.name || 'Customer', phone: order.address?.phone || user?.phone || vendor?.phone || null, address: order.address },
+    sellers: [...new Map(items.filter(i => i.seller).map(i => [i.seller.id, i.seller])).values()],
+    items: items.map(i => ({ id: i.id, name: i.name, quantity: i.quantity, unitPaise: i.unitPaise, sellerName: i.seller?.shopName ?? null, packedAt: i.packedAt })),
+  });
+});
+// Courier and tracking number, when the admin/support books the shipment (or
+// corrects it). Leaves a line on the order's journey so everyone sees who set it.
+router.put('/support/orders/:id/tracking', support, async (req, res) => {
+  const data = z.object({
+    courierName: z.string().trim().min(1).max(80), trackingNumber: z.string().trim().min(3).max(60),
+    trackingUrl: z.string().trim().url().max(500).refine(v => v.startsWith('https://'), 'Tracking link must use HTTPS').nullish(),
+  }).parse(req.body);
+  const order = await db.order.findUnique({ where: { id: req.params.id }, select: { status: true } });
+  requireThat(order, 404, 'Order not found');
+  requireThat(!['PENDING_PAYMENT', 'CANCELLED'].includes(order.status), 400, 'This order cannot be shipped');
+  await db.order.update({ where: { id: req.params.id }, data: { courierName: data.courierName, trackingNumber: data.trackingNumber, trackingUrl: data.trackingUrl || null } });
+  await recordShipmentEvent({ orderId: req.params.id, status: 'UPDATE', title: `Courier: ${data.courierName}, tracking number ${data.trackingNumber}`, source: req.actor.role === 'ADMIN' ? 'ADMIN' : 'SUPPORT', actorName: req.actor.account.name });
+  res.json(publicOrder(await ownedOrder({ role: 'ADMIN' }, req.params.id)));
+});
+// For couriers with no webhook: the admin/support adds a step by hand. Only the
+// admin can close an order as delivered this way (a real delivery comes from the
+// courier or the recipient's OTP).
+router.post('/support/orders/:id/events', support, async (req, res) => {
+  const { status, note, location } = z.object({
+    status: z.enum(['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERY_FAILED', 'DELIVERED', 'RTO_INITIATED', 'RTO_DELIVERED', 'UPDATE']),
+    note: z.string().trim().min(1).max(500).optional(), location: z.string().trim().max(200).optional(),
+  }).parse(req.body);
+  requireThat(status !== 'DELIVERED' || req.actor.role === 'ADMIN', 403, 'Only the admin can mark an order delivered by hand');
+  requireThat(status !== 'UPDATE' || note, 400, 'Add a note describing the update');
+  await recordShipmentEvent({ orderId: req.params.id, status, title: status === 'UPDATE' ? note : undefined, note: status === 'UPDATE' ? undefined : note, location, source: req.actor.role === 'ADMIN' ? 'ADMIN' : 'SUPPORT', actorName: req.actor.account.name });
+  res.json(publicOrder(await ownedOrder({ role: 'ADMIN' }, req.params.id)));
+});
 router.post('/support/tickets/:id/message', support, async (req, res) => {
   const { body } = supportMsg.parse(req.body);
-  const ticket = await db.supportTicket.findUnique({ where: { id: req.params.id } });
+  const ticket = await db.supportTicket.findUnique({ where: { id: req.params.id }, include: { user: { select: { id: true, fcmToken: true } } } });
   requireThat(ticket, 404, 'Ticket not found');
   const messages = [...(ticket.messages || []), { sender: req.actor.role === 'ADMIN' ? 'ADMIN' : 'SUPPORT', name: req.actor.account.name || 'Support', body, at: new Date().toISOString() }];
-  res.json(await db.supportTicket.update({ where: { id: ticket.id }, data: { messages, handledByName: req.actor.account.name || 'Support' } }));
+  const updated = await db.supportTicket.update({ where: { id: ticket.id }, data: { messages, handledByName: req.actor.account.name || 'Support' } });
+  // A customer's problem: tell their phone that support has answered.
+  if (ticket.user) await pushToUser(ticket.user, { title: 'NTSA support replied', body: body.slice(0, 120), data: { ticketId: ticket.id } });
+  res.json(updated);
+});
+// What support told the delivery team, and what came back. Staff-only: kept on
+// the ticket so the next person on shift sees the whole chase, but never shown
+// to the customer or the seller. Sending marks the ticket "waiting on the
+// delivery team"; logging their reply clears it.
+router.post('/support/tickets/:id/delivery-team', support, async (req, res) => {
+  const { body, direction } = z.object({ body: z.string().trim().min(1).max(1000), direction: z.enum(['SENT', 'REPLY']) }).parse(req.body);
+  const ticket = await db.supportTicket.findUnique({ where: { id: req.params.id } });
+  requireThat(ticket, 404, 'Ticket not found');
+  const entry = { sender: 'SUPPORT', name: req.actor.account.name || 'Support', body: `${direction === 'SENT' ? 'Asked the delivery team' : 'Delivery team replied'}: ${body}`, at: new Date().toISOString(), internal: true };
+  res.json(await db.supportTicket.update({ where: { id: ticket.id }, data: { messages: [...(ticket.messages || []), entry], awaitingDeliveryTeam: direction === 'SENT', handledByName: req.actor.account.name || 'Support' } }));
 });
 router.post('/support/tickets/:id/resolve', support, async (req, res) => res.json(await db.supportTicket.update({ where: { id: req.params.id }, data: { status: 'RESOLVED', handledByName: req.actor.account.name || 'Support' } })));
 router.post('/support/tickets/:id/reopen', support, async (req, res) => res.json(await db.supportTicket.update({ where: { id: req.params.id }, data: { status: 'OPEN' } })));
@@ -1029,11 +1180,20 @@ router.post('/seller/products/:id/duplicate', seller, async (req, res) => {
 // customer's name, never a vendor's. The full address/phone still isn't
 // here: NTSA packs and delivers for sellers, so that's the packing team's
 // business, not the seller's.
+// A seller's own alerts: delivered, delivery failed, being returned, or the
+// customer reported a problem with their item.
+router.get('/seller/notifications', seller, async (req, res) => res.json(await db.notification.findMany({ where: { audience: `SELLER:${req.actor.id}` }, orderBy: { createdAt: 'desc' }, take: 100 })));
+router.post('/seller/notifications/read', seller, async (req, res) => {
+  await db.notification.updateMany({ where: { audience: `SELLER:${req.actor.id}`, readAt: null }, data: { readAt: new Date() } });
+  res.status(204).end();
+});
 router.get('/seller/orders', seller, async (req, res) => {
   const commissionPercent = req.actor.account.commissionPercent;
   const items = await db.orderItem.findMany({
     where: { sellerId: req.actor.id },
-    include: { order: { select: { id: true, status: true, createdAt: true, paymentMethod: true, vendorId: true, address: true, deliveryPartner: true, expectedDeliveryAt: true, deliveredAt: true } }, product: { select: { images: true } } },
+    include: { order: { select: { id: true, status: true, createdAt: true, paymentMethod: true, vendorId: true, address: true, deliveryPartner: true, expectedDeliveryAt: true, deliveredAt: true, courierName: true, trackingNumber: true, trackingUrl: true,
+      events: { select: { id: true, status: true, title: true, location: true, occurredAt: true }, orderBy: { occurredAt: 'asc' } },
+      tickets: { where: { status: 'OPEN', kind: { not: 'GENERAL' } }, select: { id: true, kind: true } } } }, product: { select: { images: true } } },
     orderBy: { id: 'desc' }, take: 200,
   });
   res.json(items.map(({ order, product, ...item }) => {
@@ -1042,6 +1202,8 @@ router.get('/seller/orders', seller, async (req, res) => {
     return { ...item, image: product.images[0] ?? null, orderId: order.id, status: order.status, placedAt: order.createdAt,
       buyerName: order.address?.name || null, buyer: order.vendorId ? 'Wholesale' : 'Customer', address: order.address || null,
       deliveryPartner: order.deliveryPartner || null, expectedDeliveryAt: order.expectedDeliveryAt || null, deliveredAt: order.deliveredAt || null,
+      courierName: order.courierName || null, trackingNumber: order.trackingNumber || null, trackingUrl: order.trackingUrl || null,
+      events: order.events, openIssues: order.tickets,
       grossPaise, commissionPercent, commissionPaise, netPaise: grossPaise - commissionPaise };
   }));
 });

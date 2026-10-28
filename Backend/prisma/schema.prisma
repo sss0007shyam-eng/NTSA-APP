@@ -41,6 +41,7 @@ model User {
   wallet Wallet?
   wishlist Wishlist[]
   cart CartItem[]
+  tickets SupportTicket[]
   @@map("users")
 }
 // Everyone who signs into the admin panel. `role` decides which pages they
@@ -129,19 +130,32 @@ model SupportTicket {
   id String @id @default(cuid())
   sellerId String?
   productId String?
-  raisedByRole String // SELLER | ADMIN
+  // A customer's complaint about an order (not received, damaged...). Support
+  // sees the order, courier and timeline beside it.
+  userId String?
+  orderId String?
+  kind String @default("GENERAL") // GENERAL | NOT_RECEIVED | DAMAGED | WRONG_ITEM | OTHER
+  // Support has asked the delivery team and is waiting to hear back.
+  awaitingDeliveryTeam Boolean @default(false)
+  raisedByRole String // SELLER | ADMIN | CUSTOMER
   subject String
   status String @default("OPEN") // OPEN | RESOLVED
   rating Int?
   feedback String?
   // Who on the support side last handled it, shown to the admin with the rating.
   handledByName String?
-  // The conversation: [{ sender: 'SELLER'|'SUPPORT'|'ADMIN', name, body, at }].
+  // The conversation: [{ sender: 'SELLER'|'CUSTOMER'|'SUPPORT'|'ADMIN', name, body, at, internal? }].
+  // `internal` notes (what the delivery team said) are for staff only; the
+  // customer's and seller's views leave them out.
   messages Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   seller Seller? @relation(fields: [sellerId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
+  order Order? @relation(fields: [orderId], references: [id])
   @@index([status, createdAt])
+  @@index([orderId])
+  @@index([userId])
   @@map("support_tickets")
 }
 // One fine the admin has docked, kept as its own row so the seller can see
@@ -443,6 +457,12 @@ model Order {
   deliveryOtpHash String?
   deliveryOtpExpiresAt DateTime?
   deliveryOtpAttempts Int @default(0)
+  // The courier carrying it and the number to track it with. Filled in by the
+  // admin/support (or the courier's webhook), shown to the customer, the seller
+  // and the support team.
+  courierName String?
+  trackingNumber String?
+  trackingUrl String?
   // Extra charge or discount lines the admin has added to this one's bill,
   // e.g. [{"label":"Handling","amountPaise":2000},{"label":"Goodwill","amountPaise":-5000}].
   // They print on the invoice and adjust the printed total; the amount paid
@@ -453,8 +473,34 @@ model Order {
   user User? @relation(fields: [userId], references: [id])
   vendor Vendor? @relation(fields: [vendorId], references: [id])
   items OrderItem[]
+  events ShipmentEvent[]
+  tickets SupportTicket[]
   @@index([status, createdAt])
+  @@index([trackingNumber])
   @@map("orders")
+}
+// One step in an order's journey (picked up, in transit, out for delivery,
+// attempt failed, delivered, returned...). Written by the courier's webhook,
+// or by the admin/support when the courier has no API. Everyone who can see the
+// order -- customer, seller, admin, support -- reads the same list.
+model ShipmentEvent {
+  id String @id @default(cuid())
+  orderId String
+  // Normalised: PICKED_UP | IN_TRANSIT | OUT_FOR_DELIVERY | DELIVERY_FAILED |
+  // DELIVERED | RTO_INITIATED | RTO_DELIVERED | ISSUE_REPORTED | UPDATE
+  status String
+  title String
+  location String?
+  note String?
+  source String // COURIER | ADMIN | SUPPORT | CUSTOMER | SYSTEM
+  actorName String?
+  // Courier webhooks resend; the same awb+status+time is stored once.
+  dedupeKey String? @unique
+  occurredAt DateTime
+  createdAt DateTime @default(now())
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  @@index([orderId, occurredAt])
+  @@map("shipment_events")
 }
 model OrderItem {
   id String @id @default(cuid())
