@@ -9,6 +9,7 @@ import '../../providers/cart_provider.dart';
 import '../../widgets/price_tag.dart';
 import '../../widgets/primary_button.dart';
 import '../cart/cart_screen.dart';
+import 'delivery_updates.dart';
 
 /// Translated label for a server order status; unknown values are prettified.
 String orderStatusLabel(BuildContext context, String status) {
@@ -246,6 +247,22 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                             const SizedBox(height: 4),
                             _DeliveryInfo(partner: order.deliveryPartner, expectedAt: order.expectedDeliveryAt),
                           ],
+                          DeliveryUpdates(order: order),
+                          // Shipped, out for delivery or delivered: if something is wrong the
+                          // shopper tells NTSA support from here, and they chase the courier.
+                          if (!order.isVendorOrder && problemKindsFor(order.status).length > 1)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () => reportProblem(context, order).then((_) => _load()),
+                                  icon: const Icon(Icons.support_agent_rounded, size: 19),
+                                  label: Text(context.tr('sup.problem.button')),
+                                  style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger, side: const BorderSide(color: AppColors.danger), padding: const EdgeInsets.symmetric(vertical: 13)),
+                                ),
+                              ),
+                            ),
                           const SizedBox(height: 8),
                           Text(context.tr('orders.track.items'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                           const SizedBox(height: 8),

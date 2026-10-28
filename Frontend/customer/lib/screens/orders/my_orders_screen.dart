@@ -75,6 +75,16 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                               ),
                               const SizedBox(height: 6),
                               Text(order.items.map((i) => i.name).join(', '), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+                              // A failed attempt or a parcel on its way back matters more than
+                              // the order's own status, so it gets its own line here.
+                              if (order.events.isNotEmpty && order.events.last.isProblem) ...[
+                                const SizedBox(height: 6),
+                                Row(children: [
+                                  const Icon(Icons.error_outline_rounded, size: 15, color: AppColors.danger),
+                                  const SizedBox(width: 5),
+                                  Expanded(child: Text(context.tr(_problemKeys[order.events.last.status] ?? 'sup.ev.delivery_failed'), style: const TextStyle(color: AppColors.danger, fontSize: 12.5, fontWeight: FontWeight.w600))),
+                                ]),
+                              ],
                               const SizedBox(height: 6),
                               PriceTag(pricePaise: order.totalPaise, size: 14),
                             ],
@@ -87,6 +97,13 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     );
   }
 }
+
+const _problemKeys = {
+  'DELIVERY_FAILED': 'sup.ev.delivery_failed',
+  'RTO_INITIATED': 'sup.ev.rto_initiated',
+  'RTO_DELIVERED': 'sup.ev.rto_delivered',
+  'ISSUE_REPORTED': 'sup.ev.issue_reported',
+};
 
 class _StatusBadge extends StatelessWidget {
   const _StatusBadge({required this.status});

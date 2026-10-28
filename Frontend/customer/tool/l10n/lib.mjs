@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const EN_DIR = path.join(ROOT, 'lib', 'l10n', 'en');
 export const LANG_DIR = path.join(ROOT, 'lib', 'l10n', 'lang');
-export const GROUPS = ['common', 'auth', 'account', 'shop', 'orders', 'wholesale', 'search_tools'];
+export const GROUPS = ['common', 'auth', 'account', 'shop', 'orders', 'wholesale', 'search_tools', 'support'];
 
 const BACKSLASH = String.fromCharCode(92);
 

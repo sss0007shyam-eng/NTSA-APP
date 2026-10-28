@@ -30,6 +30,30 @@ class OrderItem {
       );
 }
 
+/// One step in an order's journey, as the Backend records it (the courier's
+/// webhook, or the admin/support). [status] is one of PICKED_UP, IN_TRANSIT,
+/// OUT_FOR_DELIVERY, DELIVERY_FAILED, DELIVERED, RTO_INITIATED, RTO_DELIVERED,
+/// ISSUE_REPORTED, UPDATE; [title] is the Backend's own wording, used when the
+/// status has no translation of its own (UPDATE).
+class ShipmentEvent {
+  ShipmentEvent({required this.status, required this.title, this.location, required this.at});
+
+  final String status;
+  final String title;
+  final String? location;
+  final DateTime at;
+
+  /// A step the customer should notice: the courier failed, or the parcel is going back.
+  bool get isProblem => status == 'DELIVERY_FAILED' || status == 'RTO_INITIATED' || status == 'RTO_DELIVERED' || status == 'ISSUE_REPORTED';
+
+  factory ShipmentEvent.fromJson(Map<String, dynamic> json) => ShipmentEvent(
+        status: json['status'] as String? ?? 'UPDATE',
+        title: json['title'] as String? ?? '',
+        location: (json['location'] as String?)?.isNotEmpty == true ? json['location'] as String : null,
+        at: DateTime.tryParse(json['occurredAt']?.toString() ?? '')?.toLocal() ?? DateTime.now(),
+      );
+}
+
 class Order {
   Order({
     required this.id,
@@ -45,6 +69,10 @@ class Order {
     this.deliveryPartner,
     this.expectedDeliveryAt,
     this.isVendorOrder = false,
+    this.courierName,
+    this.trackingNumber,
+    this.trackingUrl,
+    this.events = const [],
   });
 
   final String id;
@@ -60,6 +88,12 @@ class Order {
   final String? deliveryPartner;
   final DateTime? expectedDeliveryAt;
   final bool isVendorOrder;
+  /// Who is carrying it and the number to track it with, once booked.
+  final String? courierName;
+  final String? trackingNumber;
+  final String? trackingUrl;
+  /// The journey so far, oldest first.
+  final List<ShipmentEvent> events;
 
   static const statusSteps = ['PLACED', 'PACKED', 'SHIPPED', 'OUT_FOR_DELIVERY', 'DELIVERED'];
 
@@ -77,5 +111,9 @@ class Order {
         deliveryPartner: json['deliveryPartner'] as String?,
         expectedDeliveryAt: DateTime.tryParse(json['expectedDeliveryAt']?.toString() ?? ''),
         isVendorOrder: json['vendorId'] != null,
+        courierName: json['courierName'] as String?,
+        trackingNumber: json['trackingNumber'] as String?,
+        trackingUrl: json['trackingUrl'] as String?,
+        events: (json['events'] as List? ?? []).map((e) => ShipmentEvent.fromJson(e as Map<String, dynamic>)).toList(),
       );
 }

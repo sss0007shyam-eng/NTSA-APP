@@ -5,6 +5,7 @@ import 'shop.dart';
 import 'orders.dart';
 import 'wholesale.dart';
 import 'search_tools.dart';
+import 'support.dart';
 
 /// Every English string in the app, merged from the per-group files.
 const Map<String, String> kEnglish = {
@@ -15,4 +16,5 @@ const Map<String, String> kEnglish = {
   ...enOrders,
   ...enWholesale,
   ...enSearchTools,
+  ...enSupport,
 };

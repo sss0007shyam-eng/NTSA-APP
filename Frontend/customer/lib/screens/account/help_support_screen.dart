@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../l10n/tr.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/app_colors.dart';
+import '../support/my_requests_screen.dart';
 
 // Contact options and a short FAQ. The phone/email/WhatsApp here are the
 // NTSA support details — change these in one place if they move.
@@ -31,6 +32,7 @@ class HelpSupportScreen extends StatelessWidget {
             const SizedBox(height: 4),
             Text(context.tr('account.help.hours'), style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
             const SizedBox(height: 16),
+            _ContactTile(icon: Icons.forum_outlined, label: context.tr('sup.requests.title'), value: context.tr('sup.chat.title'), onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyRequestsScreen()))),
             _ContactTile(icon: Icons.call_rounded, label: context.tr('account.help.call_us'), value: _supportPhone, onTap: () => _open(context, Uri.parse('tel:$_supportPhone'))),
             _ContactTile(icon: Icons.chat_rounded, label: context.tr('account.help.whatsapp'), value: context.tr('account.help.chat_whatsapp'), onTap: () => _open(context, Uri.parse('https://wa.me/$_supportWhatsApp'))),
             _ContactTile(icon: Icons.mail_outline_rounded, label: context.tr('account.help.email'), value: _supportEmail, onTap: () => _open(context, Uri.parse('mailto:$_supportEmail?subject=NTSA%20Support'))),
