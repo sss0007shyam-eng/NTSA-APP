@@ -161,6 +161,9 @@ router.get('/me', async (req, res) => {
 });
 router.patch('/me', customer, async (req, res) => {
   const data = z.object({ name: z.string().trim().min(1).max(100).optional(), email: z.string().email().optional(), fcmToken: z.string().max(4096).nullable().optional() }).strict().parse(req.body);
+  // A phone's push token belongs to one customer at a time: if someone else
+  // signed in on this phone before, their pushes must stop here.
+  if (data.fcmToken) await db.user.updateMany({ where: { fcmToken: data.fcmToken, id: { not: req.actor.id } }, data: { fcmToken: null } });
   res.json(await db.user.update({ where: { id: req.actor.id }, data }));
 });
 // Any password-holding account changes its own password: verify the current

@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../core/api_client.dart';
 import '../core/image_upload.dart';
 import '../models/user.dart';
+import '../services/push_service.dart';
 
 /// Real customer sign-in goes through Firebase (phone OTP / Google) once the
 /// client hands over those credentials -> Backend's POST /auth/firebase.
@@ -46,6 +47,7 @@ class AuthProvider extends ChangeNotifier {
       final me = await ApiClient.instance.get('/me', notifyUnauthorized: false) as Map<String, dynamic>;
       role = me['role'] as String? ?? 'CUSTOMER';
       user = role == 'CUSTOMER' ? AppUser.fromJson(me) : null;
+      if (user != null) unawaited(PushService.instance.register());
       notifyListeners();
       return me;
     } on ApiException catch (e) {
@@ -140,6 +142,7 @@ class AuthProvider extends ChangeNotifier {
         await ApiClient.instance.saveToken(data['token'] as String);
         role = 'CUSTOMER';
         user = AppUser.fromJson(data['user'] as Map<String, dynamic>);
+        unawaited(PushService.instance.register());
         return true;
       }
       // Web, or the Google/Apple buttons (no phone): the backend's demo login.
@@ -188,6 +191,8 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    // Needs the session token, so it goes before the token is cleared.
+    if (user != null) await PushService.instance.unregister();
     if (_firebaseReady) {
       try {
         await FirebaseAuth.instance.signOut();

@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Voice search listens through the phone's speech recognizer. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Android 13+ asks before showing order and delivery push notifications. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="NTSA"
         android:name="${applicationName}"
