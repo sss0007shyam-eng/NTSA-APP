@@ -157,7 +157,7 @@
 .pages-group h3{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#8b9aa3;margin:0 0 4px}
 [data-theme="dark"] .pages-group+.pages-group{border-top-color:#28344d}
 .verify-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:#fdecec;color:#c0392b}
-.verify-chip.ok{background:#e3f4ea;color:#1f8f54}
+.verify-chip.ok{background:#e3f4ea;color:#1f8f54}.verify-chip.warn{background:#fdf0dd;color:#9a6508}.verify-box{border:1px solid #dbe3e8;border-radius:10px;margin:0 0 20px;background:#fafcfd}.verify-row{display:flex;gap:14px;align-items:flex-start;justify-content:space-between;padding:14px 16px}.verify-row+.verify-row{border-top:1px solid #e7edf0}.verify-row strong{font-size:12px}.verify-row small{margin-top:4px}.verify-row .verify-chip{margin-right:6px}.verify-row button{flex-shrink:0;border:0;border-radius:7px;padding:9px 13px;font-size:11px;font-weight:650}
 .kebab{padding:5px 7px;border-radius:8px}
 .kebab:hover{background:#eef2f4}
 .kebab-menu{position:fixed;z-index:1200;background:#fff;border:1px solid #e5ebef;border-radius:11px;box-shadow:0 12px 34px #0b213a24;padding:6px;min-width:172px;display:flex;flex-direction:column}

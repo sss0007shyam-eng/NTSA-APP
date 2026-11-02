@@ -8,6 +8,10 @@ export const config = z.object({
   // Shared secret the courier (or aggregator) sends with every tracking webhook.
   // Unset = the webhook is switched off.
   COURIER_WEBHOOK_SECRET: z.string().min(16).optional(),
+  // Key for the GST-lookup provider (a reseller fronting a licensed GSP --
+  // there is no free GSTN endpoint). Unset = the "Verify from portal"
+  // button says so plainly and the manual tick is all there is.
+  GST_VERIFY_API_KEY: z.string().min(8).optional(),
 }).parse(process.env);
 if (config.NODE_ENV === 'production' && (config.DEMO_MODE || config.JWT_SECRET.includes('replace-this'))) {
   throw new Error('Production requires a private JWT secret and DEMO_MODE=false');
