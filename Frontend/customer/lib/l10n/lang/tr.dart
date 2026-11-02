@@ -233,6 +233,8 @@ const Map<String, String> strings = {
   'ai.found': 'Bulduklarım şunlar:',
   'ai.found_for': '{bits} için bulduklarım:',
   'ai.color_missed': 'Tam olarak {color} renkte bulamadım ama en yakın eşleşmeler şunlar:',
+  'ai.over_budget': '{bits} için bir şey bulamadım. Bunlar bütçenizin biraz üzerindeki en yakın ürünler:',
+  'ai.relaxed_all': '{bits} ile tam eşleşen bir şey yok. Elimdeki en yakın ürünler bunlar:',
   'ai.price_under': '{amount} altı',
   'ai.price_above': '{amount} üstü',
   'search.hint': 'Ürün ara...',

@@ -6,6 +6,7 @@ import '../core/image_upload.dart';
 import '../models/banner.dart';
 import '../models/category.dart';
 import '../models/coupon.dart';
+import '../models/assistant_reply.dart';
 import '../models/product.dart';
 
 class ShopProvider extends ChangeNotifier {
@@ -116,6 +117,15 @@ class ShopProvider extends ChangeNotifier {
       'sort': ?sort,
     });
     return (data as List).map((e) => Product.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// The shopping assistant: one plain sentence ("mujhe white jute lene hain
+  /// aur 1500 ka mera budget hai") in, real catalog products out, together
+  /// with how the sentence was read so the screen can show it back.
+  Future<AssistantReply> assistantSearch(String sentence) async {
+    final query = sentence.trim();
+    final data = await ApiClient.instance.post('/products/assist', data: {'query': query.length > 200 ? query.substring(0, 200) : query}) as Map<String, dynamic>;
+    return AssistantReply.fromJson(data);
   }
 
   /// Photo search: the products that look most like [photo], best first.

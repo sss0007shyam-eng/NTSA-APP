@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/app_colors.dart';
+import '../../models/assistant_reply.dart';
 import '../../models/product.dart';
 import '../../providers/shop_provider.dart';
 import '../../widgets/app_network_image.dart';
@@ -8,12 +9,17 @@ import '../../widgets/price_tag.dart';
 import '../products/product_details_screen.dart';
 import '../../l10n/tr.dart';
 
-/// A lightweight shopping assistant: the shopper describes what they're
-/// after in plain words and it searches the catalog (matching name and
-/// description) for it. There's no real language model behind this -- it's
-/// a keyword-cleaning heuristic over GET /products -- but it gives the same
-/// "type what you want, see matching products" experience the client asked
-/// for without needing a paid AI API key.
+/// The shopping assistant: the shopper describes what they want in their own
+/// words ("mujhe white jute lene hain aur 1500 ka mera budget hai") and gets
+/// real catalog products back.
+///
+/// The sentence is read on the server (POST /products/assist, backed by
+/// Backend/src/lib/shopQuery.js), which also sends back how it read it --
+/// colour, item, budget. That reading is shown above the results, because the
+/// one thing a parser does worse than a person is guess what an unfamiliar
+/// word means, and a shopper who can see the guess can correct it. No
+/// language model is involved, and nothing here invents a product: every card
+/// below came out of a catalog query.
 class AiAssistantScreen extends StatefulWidget {
   const AiAssistantScreen({super.key});
 
@@ -33,6 +39,23 @@ class _ChatMessage {
   final List<Product>? products;
 }
 
+/// How the server's reading of the sentence reads back to this shopper, in
+/// their own language: "White · Shoes · under ₹1500". The parts themselves
+/// (colour names, item kinds) come from the catalog and stay in English, the
+/// same as category names everywhere else in the app.
+String _summaryFor(BuildContext context, AssistantReply reply) {
+  final bits = [...reply.labelParts];
+  final min = reply.minRupees, max = reply.maxRupees;
+  if (min != null && max != null) {
+    bits.add('${formatPaise(min * 100)}–${formatPaise(max * 100)}');
+  } else if (max != null) {
+    bits.add(context.tr('ai.price_under', {'amount': formatPaise(max * 100)}));
+  } else if (min != null) {
+    bits.add(context.tr('ai.price_above', {'amount': formatPaise(min * 100)}));
+  }
+  return bits.join(' · ');
+}
+
 class _AiAssistantScreenState extends State<AiAssistantScreen> {
   final _controller = TextEditingController();
   final _scroll = ScrollController();
@@ -40,94 +63,6 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     _ChatMessage.bot(textKey: 'ai.greeting'),
   ];
   bool _loading = false;
-
-  static const _stopWords = {
-    'i', 'a', 'an', 'the', 'me', 'my', 'need', 'needs', 'want', 'wants', 'show', 'find', 'looking', 'look', 'for', 'some',
-    'please', 'get', 'buy', 'have', 'has', 'is', 'are', 'with', 'and', 'to', 'of', 'you', 'can', 'do', 'there', 'any', 'good',
-    'mujhe', 'chahiye', 'ek', 'ka', 'ki', 'ke', 'hai', 'dikhao', 'dikha', 'de', 'kuch', 'wala', 'wali', 'bhai', 'pls',
-    'plz', 'item', 'product', 'products', 'something', 'suggest', 'recommend',
-  };
-
-  // Colour words the shopper might use (English + common Hindi), mapped to the
-  // colour the catalog stores, so "safed"/"white" both match a white product.
-  static const _colors = {
-    'white': 'white', 'safed': 'white', 'black': 'black', 'kala': 'black', 'kaala': 'black',
-    'red': 'red', 'lal': 'red', 'laal': 'red', 'blue': 'blue', 'neela': 'blue', 'green': 'green', 'hara': 'green',
-    'yellow': 'yellow', 'peela': 'yellow', 'pink': 'pink', 'gulabi': 'pink', 'grey': 'grey', 'gray': 'grey',
-    'brown': 'brown', 'purple': 'purple', 'orange': 'orange', 'gold': 'gold', 'golden': 'gold',
-    'silver': 'silver', 'navy': 'navy', 'beige': 'beige', 'maroon': 'maroon', 'cream': 'cream',
-  };
-  // Words that are part of a price/colour phrase, stripped out of the search term.
-  static const _filterWords = {
-    'rs', 'rupees', 'rupay', 'rupaye', 'under', 'below', 'less', 'than', 'within', 'upto', 'max', 'maximum',
-    'above', 'over', 'more', 'min', 'minimum', 'between', 'se', 'kam', 'andar', 'niche', 'tak', 'upar', 'zyada', 'jyada',
-    'daam', 'cheap', 'cheapest', 'sasta', 'costly', 'mehnga', 'expensive', 'premium', 'best', 'top', 'popular', 'rated',
-    'budget', 'lowest', 'color', 'colour', 'rang', 'price', 'cost',
-  };
-
-  String _clean(String q) => q
-      .toLowerCase()
-      .split(RegExp(r'\s+'))
-      .where((w) => w.isNotEmpty && !_stopWords.contains(w.replaceAll(RegExp(r'[^a-z]'), '')))
-      .join(' ')
-      .trim();
-
-  // Pulls a price range, a colour and a sort out of the shopper's sentence, and
-  // leaves the rest (e.g. "shoes") as the thing to search for.
-  ({String term, int? minPrice, int? maxPrice, String? color, String? sort}) _parse(String raw) {
-    var q = raw.toLowerCase();
-    int? minP, maxP;
-    final cur = r'(?:rs\.?|rupees?|rupay|rupaye|₹)?';
-    final range = RegExp('(\\d{2,7})\\s*$cur\\s*(?:-|to|and|se)\\s*(\\d{2,7})').firstMatch(q);
-    if (range != null) {
-      final a = int.parse(range.group(1)!), b = int.parse(range.group(2)!);
-      minP = a < b ? a : b;
-      maxP = a < b ? b : a;
-      q = q.replaceRange(range.start, range.end, ' ');
-    } else {
-      final under = RegExp('(?:under|below|less than|within|upto|up to|max|maximum)\\s*$cur\\s*(\\d{2,7})').firstMatch(q)
-          ?? RegExp('(\\d{2,7})\\s*$cur\\s*(?:se kam|ke andar|ke niche|ke neeche|tak|se niche)').firstMatch(q);
-      if (under != null) {
-        maxP = int.parse(under.group(1)!);
-        q = q.replaceRange(under.start, under.end, ' ');
-      }
-      final over = RegExp('(?:above|over|more than|min|minimum)\\s*$cur\\s*(\\d{2,7})').firstMatch(q)
-          ?? RegExp('(\\d{2,7})\\s*$cur\\s*(?:se upar|se zyada|se jyada)').firstMatch(q);
-      if (over != null) {
-        minP = int.parse(over.group(1)!);
-        q = q.replaceRange(over.start, over.end, ' ');
-      }
-    }
-    String? color;
-    for (final w in q.split(RegExp(r'[^a-z]+'))) {
-      if (_colors.containsKey(w)) {
-        color = _colors[w];
-        break;
-      }
-    }
-    String? sort;
-    if (RegExp(r'cheap|sasta|lowest|budget|kam daam').hasMatch(q)) {
-      sort = 'price_asc';
-    } else if (RegExp(r'costly|mehnga|expensive|premium').hasMatch(q)) {
-      sort = 'price_desc';
-    } else if (RegExp(r'best|top|popular|rated').hasMatch(q)) {
-      sort = 'rating';
-    }
-    final words = q.split(RegExp(r'\s+')).map((w) => w.replaceAll(RegExp(r'[^a-z]'), '')).where((w) {
-      return w.isNotEmpty && !_stopWords.contains(w) && !_filterWords.contains(w) && !_colors.containsKey(w);
-    }).toList();
-    return (term: words.join(' ').trim(), minPrice: minP, maxPrice: maxP, color: color, sort: sort);
-  }
-
-  // Keeps only products that actually come in the asked-for colour -- matched
-  // against the product's colour options, its name, or its listed attributes.
-  List<Product> _filterByColor(List<Product> products, String color) {
-    final c = color.toLowerCase();
-    return products.where((p) =>
-        p.colors.any((x) => x.toLowerCase().contains(c)) ||
-        p.name.toLowerCase().contains(c) ||
-        p.attributes.any((a) => a.$2.toLowerCase().contains(c))).toList();
-  }
 
   void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -146,61 +81,9 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
     });
     _scrollToEnd();
     try {
-      final p = _parse(query);
-      final term = p.term.isEmpty ? _clean(query) : p.term;
-      var results = await shop.searchProducts(term, minPrice: p.minPrice, maxPrice: p.maxPrice, sort: p.sort);
-      // Nothing on the cleaned term? try the raw sentence (still price-filtered).
-      if (results.isEmpty && term.isNotEmpty && term != query.toLowerCase()) {
-        results = await shop.searchProducts(query, minPrice: p.minPrice, maxPrice: p.maxPrice, sort: p.sort);
-      }
-      // Still nothing? fall back to a matching category, keeping the price range.
-      if (results.isEmpty) {
-        final words = {...term.split(' '), ...query.toLowerCase().split(' ')};
-        for (final c in shop.categories) {
-          if (words.any((w) => w.isNotEmpty && c.name.toLowerCase().contains(w))) {
-            results = await shop.searchProducts('', categoryId: c.id, minPrice: p.minPrice, maxPrice: p.maxPrice, sort: p.sort);
-            if (results.isNotEmpty) break;
-          }
-        }
-      }
-      // Narrow to the asked-for colour; if that leaves nothing, keep the rest
-      // and say the exact colour wasn't found.
-      var colorMissed = false;
-      if (p.color != null && results.isNotEmpty) {
-        final filtered = _filterByColor(results, p.color!);
-        if (filtered.isNotEmpty) {
-          results = filtered;
-        } else {
-          colorMissed = true;
-        }
-      }
+      final reply = await shop.assistantSearch(query);
       if (!mounted) return;
-      if (results.isEmpty) {
-        setState(() => _messages.add(_ChatMessage.bot(textKey: 'ai.not_found')));
-      } else {
-        final bits = <String>[];
-        if (p.term.isNotEmpty) bits.add(p.term);
-        if (p.color != null) bits.add(p.color!);
-        if (p.minPrice != null && p.maxPrice != null) {
-          bits.add('₹${p.minPrice}–₹${p.maxPrice}');
-        } else if (p.maxPrice != null) {
-          bits.add(context.tr('ai.price_under', {'amount': '₹${p.maxPrice}'}));
-        } else if (p.minPrice != null) {
-          bits.add(context.tr('ai.price_above', {'amount': '₹${p.minPrice}'}));
-        }
-        final String summaryKey;
-        Map<String, String>? summaryArgs;
-        if (colorMissed) {
-          summaryKey = 'ai.color_missed';
-          summaryArgs = {'color': '${p.color}'};
-        } else if (bits.isEmpty) {
-          summaryKey = 'ai.found';
-        } else {
-          summaryKey = 'ai.found_for';
-          summaryArgs = {'bits': bits.join(' · ')};
-        }
-        setState(() => _messages.add(_ChatMessage.bot(textKey: summaryKey, textArgs: summaryArgs, products: results.take(8).toList())));
-      }
+      setState(() => _messages.add(_botReplyFor(reply)));
     } catch (e) {
       if (mounted) setState(() => _messages.add(_ChatMessage.bot(textKey: 'ai.error')));
     } finally {
@@ -209,6 +92,31 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         _scrollToEnd();
       }
     }
+  }
+
+  /// One bot bubble for a reply. When a constraint had to be dropped to find
+  /// anything, the bubble says which -- an unexplained shelf of the wrong
+  /// colour or price is worse than no results.
+  _ChatMessage _botReplyFor(AssistantReply reply) {
+    if (reply.foundNothing) return _ChatMessage.bot(textKey: 'ai.not_found');
+    final bits = _summaryFor(context, reply);
+    final String key;
+    Map<String, String>? args;
+    switch (reply.relaxed) {
+      case 'color' when reply.color != null:
+        key = 'ai.color_missed';
+        args = {'color': reply.color!};
+      case 'budget':
+        key = 'ai.over_budget';
+        args = {'bits': bits};
+      case 'all':
+        key = 'ai.relaxed_all';
+        args = {'bits': bits};
+      default:
+        key = bits.isEmpty ? 'ai.found' : 'ai.found_for';
+        args = bits.isEmpty ? null : {'bits': bits};
+    }
+    return _ChatMessage.bot(textKey: key, textArgs: args, products: reply.products);
   }
 
   @override
@@ -225,7 +133,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.smart_toy_rounded, color: AppColors.orange, size: 22),
+            Icon(Icons.manage_search_rounded, color: AppColors.orange, size: 22),
             const SizedBox(width: 8),
             Text(context.tr('ai.title')),
           ],

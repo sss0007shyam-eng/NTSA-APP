@@ -67,7 +67,7 @@ class _BottomNavShellState extends State<BottomNavShell> {
         backgroundColor: AppColors.orange,
         tooltip: context.tr('ai.title'),
         onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AiAssistantScreen())),
-        child: const Icon(Icons.smart_toy_rounded, color: Colors.white),
+        child: const Icon(Icons.manage_search_rounded, color: Colors.white),
       ),
       bottomNavigationBar: DecoratedBox(
         decoration: BoxDecoration(

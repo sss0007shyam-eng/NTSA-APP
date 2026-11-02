@@ -233,6 +233,8 @@ const Map<String, String> strings = {
   'ai.found': 'Inilah yang saya jumpa:',
   'ai.found_for': 'Inilah yang saya jumpa untuk {bits}:',
   'ai.color_missed': 'Saya tidak jumpa yang berwarna {color} dengan tepat, tetapi ini padanan yang paling hampir:',
+  'ai.over_budget': 'Tiada apa-apa yang sepadan untuk {bits}. Ini yang paling hampir, sedikit melebihi bajet anda:',
+  'ai.relaxed_all': 'Tiada yang betul-betul sepadan dengan {bits}. Ini produk yang paling hampir yang saya ada:',
   'ai.price_under': 'bawah {amount}',
   'ai.price_above': 'atas {amount}',
   'search.hint': 'Cari produk...',

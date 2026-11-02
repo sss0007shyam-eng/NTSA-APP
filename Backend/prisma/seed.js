@@ -59,6 +59,14 @@ const samples = [
     colorImages: { Black: imageUrl('photo-1653868248894-fd2882c61524'), White: imageUrl('photo-1562687769-3bc08bfc093f'), Red: imageUrl('photo-1542291026-7eec264c27ff') },
   },
   {
+    // A white shoe under Rs 1,500, so the shopping assistant's own example
+    // ("white jute, 1500 ka budget") lands on a plain hit rather than on the
+    // nearest-above-budget fallback.
+    name: 'Everyday Canvas Sneakers', category: 'Sports', pricePaise: 129900, wholesalePaise: 89900, mrpPaise: 199900, deal: false,
+    colors: ['White', 'Black'], sizes: ['6', '7', '8', '9', '10'],
+    images: [imageUrl('photo-1549298916-b41d501d3772')],
+  },
+  {
     name: 'Portable Bluetooth Speaker', category: 'Electronics', pricePaise: 199900, wholesalePaise: 139900, mrpPaise: 349900, deal: false,
     colors: ['Black', 'Blue', 'Red'], sizes: [],
     colorImages: { Black: imageUrl('photo-1511499271651-073325718d90'), Blue: imageUrl('photo-1692351014024-97edd83a7b5a'), Red: imageUrl('photo-1564975472884-a6e9fd24e967') },

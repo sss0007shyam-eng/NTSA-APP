@@ -24,12 +24,14 @@ const Map<String, String> enShop = {
   // Assistant
   'ai.title': 'Shopping Assistant',
   'ai.hint': 'Describe what you need…',
-  'ai.greeting': 'Hi! Tell me what you\'re looking for — you can add a budget or a colour too.\nTry: "shoes under 1000", "white shirt", or "headphones between 500 and 2000".',
+  'ai.greeting': 'Hi! Tell me what you\'re looking for, in English or Hinglish — a colour and a budget help.\nTry: "white shoes under 1500", "mujhe white jute, 1500 ka budget", or "headphones between 500 and 2000".\nI\'ll show you what I searched for, so you can correct me.',
   'ai.not_found': 'I couldn\'t find anything matching that. Try describing it differently, or browse categories from Home.',
   'ai.error': 'Something went wrong while searching. Please try again.',
   'ai.found': 'Here\'s what I found:',
   'ai.found_for': 'Here\'s what I found for {bits}:',
   'ai.color_missed': 'I couldn\'t find {color} ones exactly, but here are the closest matches:',
+  'ai.over_budget': 'Nothing matched {bits}. These are the closest, just above your budget:',
+  'ai.relaxed_all': 'Nothing exactly matched {bits}. Here are the closest products I have:',
   'ai.price_under': 'under {amount}',
   'ai.price_above': 'above {amount}',
 

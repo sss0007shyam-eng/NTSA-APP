@@ -233,6 +233,8 @@ const Map<String, String> strings = {
   'ai.found': 'Oto, co znalazłem:',
   'ai.found_for': 'Oto, co znalazłem ({bits}):',
   'ai.color_missed': 'Nie znalazłem dokładnie w kolorze {color}, ale oto najbliższe dopasowania:',
+  'ai.over_budget': 'Nic nie pasuje do {bits}. To najbliższe propozycje, nieco powyżej Twojego budżetu:',
+  'ai.relaxed_all': 'Nic nie odpowiada dokładnie {bits}. Oto najbardziej podobne produkty, jakie mam:',
   'ai.price_under': 'do {amount}',
   'ai.price_above': 'od {amount}',
   'search.hint': 'Szukaj produktów...',

@@ -233,6 +233,8 @@ const Map<String, String> strings = {
   'ai.found': '찾은 상품이에요:',
   'ai.found_for': '{bits} 조건으로 찾은 상품이에요:',
   'ai.color_missed': '{color} 상품은 정확히 찾지 못했지만, 가장 비슷한 상품이에요:',
+  'ai.over_budget': '{bits}에 맞는 상품을 찾지 못했어요. 예산보다 조금 비싸지만 가장 가까운 상품이에요:',
+  'ai.relaxed_all': '{bits}와 정확히 맞는 상품은 없어요. 제가 가진 가장 비슷한 상품이에요:',
   'ai.price_under': '{amount} 이하',
   'ai.price_above': '{amount} 이상',
   'search.hint': '상품 검색...',

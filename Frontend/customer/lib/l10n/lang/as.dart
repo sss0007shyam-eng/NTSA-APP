@@ -233,6 +233,8 @@ const Map<String, String> strings = {
   'ai.found': 'মই যিবোৰ পালোঁ:',
   'ai.found_for': '{bits} ৰ বাবে মই যিবোৰ পালোঁ:',
   'ai.color_missed': 'ঠিক {color} ৰঙৰ নাপালোঁ, কিন্তু আটাইতকৈ ওচৰৰবোৰ এইবোৰ:',
+  'ai.over_budget': '{bits}-ৰ বাবে কিছুও মিলা নাই। এইবোৰ আটাইতকৈ কাষৰীয়া, আপোনাৰ বাজেটতকৈ অলপ বেছি:',
+  'ai.relaxed_all': '{bits}-ৰ সৈতে একেবাৰে মিলা কিছুও নাই। মোৰ হাতত থকা আটাইতকৈ কাষৰীয়া সামগ্ৰী এইবোৰ:',
   'ai.price_under': '{amount} তকৈ কম',
   'ai.price_above': '{amount} তকৈ বেছি',
   'search.hint': 'বস্তু সন্ধান কৰক...',

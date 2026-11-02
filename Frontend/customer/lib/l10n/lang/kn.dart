@@ -233,6 +233,8 @@ const Map<String, String> strings = {
   'ai.found': 'ನನಗೆ ಸಿಕ್ಕಿದ್ದು ಇವು:',
   'ai.found_for': '{bits} ಗಾಗಿ ಸಿಕ್ಕಿದ್ದು ಇವು:',
   'ai.color_missed': '{color} ಬಣ್ಣದವು ನಿಖರವಾಗಿ ಸಿಗಲಿಲ್ಲ, ಆದರೆ ಹತ್ತಿರದವು ಇಲ್ಲಿವೆ:',
+  'ai.over_budget': '{bits} ಗೆ ಏನೂ ಹೊಂದಿಕೆಯಾಗಿಲ್ಲ. ಇವು ನಿಮ್ಮ ಬಜೆಟ್‌ಗಿಂತ ಸ್ವಲ್ಪ ಹೆಚ್ಚು, ಆದರೆ ಹತ್ತಿರದವು:',
+  'ai.relaxed_all': '{bits} ಗೆ ನಿಖರವಾಗಿ ಹೊಂದುವುದು ಏನೂ ಇಲ್ಲ. ನನ್ನ ಬಳಿ ಇರುವ ಹತ್ತಿರದ ಉತ್ಪನ್ನಗಳು ಇವು:',
   'ai.price_under': '{amount} ಒಳಗೆ',
   'ai.price_above': '{amount} ಮೇಲೆ',
   'search.hint': 'ಉತ್ಪನ್ನಗಳನ್ನು ಹುಡುಕಿ...',

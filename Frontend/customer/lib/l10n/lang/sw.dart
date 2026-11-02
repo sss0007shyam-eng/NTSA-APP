@@ -233,6 +233,8 @@ const Map<String, String> strings = {
   'ai.found': 'Hiki ndicho nilichopata:',
   'ai.found_for': 'Hiki ndicho nilichopata kwa {bits}:',
   'ai.color_missed': 'Sikupata za rangi {color} kamili, lakini hizi ndizo zinazokaribia zaidi:',
+  'ai.over_budget': 'Hakuna kilichopatana na {bits}. Hivi ni vilivyo karibu zaidi, kidogo juu ya bajeti yako:',
+  'ai.relaxed_all': 'Hakuna kinacholingana kabisa na {bits}. Hivi ni bidhaa zilizo karibu zaidi nilizo nazo:',
   'ai.price_under': 'chini ya {amount}',
   'ai.price_above': 'juu ya {amount}',
   'search.hint': 'Tafuta bidhaa...',
