@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { LayoutDashboard, Package, ShoppingBag, LogOut, Plus, ArrowUpRight, ChevronRight, Check, Menu, ShieldCheck, Wallet, Store, Search, BadgeCheck, Truck, Image, X, Percent, PackageCheck, BarChart3, PieChart, LifeBuoy, Settings as SettingsIcon, Eye, EyeOff, TrendingUp, Bell, AlertTriangle, Smartphone, Laptop } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, LogOut, Plus, ArrowUpRight, ChevronRight, Check, Menu, ShieldCheck, Wallet, Store, Search, BadgeCheck, Truck, Image, X, Percent, PackageCheck, BarChart3, PieChart, LifeBuoy, Settings as SettingsIcon, Eye, EyeOff, TrendingUp, Bell, AlertTriangle, Smartphone, Laptop, RotateCcw } from 'lucide-react';
 import { api, money, paise, suggestCategory, deviceToken, rememberDevice } from './api';
 import { Button, Field, PasswordField, Badge, Empty, Modal, Stat, ProductImage, CONDITION_LABEL } from './ui';
 import './style.css';
@@ -36,7 +36,7 @@ function App() {
     return sessionStorage.getItem('ntsa-token');
   });
   const [me, setMe] = useState(null), [page, setPage] = useState(() => { try { return sessionStorage.getItem('ntsa-page') || 'Overview'; } catch { return 'Overview'; } }), [penalties, setPenalties] = useState([]), [tickets, setTickets] = useState([]);
-  const [products, setProducts] = useState([]), [orders, setOrders] = useState([]), [summary, setSummary] = useState(null), [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]), [orders, setOrders] = useState([]), [summary, setSummary] = useState(null), [categories, setCategories] = useState([]), [refunds, setRefunds] = useState([]);
   const [error, setError] = useState(''), [toast, setToast] = useState(''), [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false), [modal, setModal] = useState(null), [query, setQuery] = useState(''), [mobileNav, setMobileNav] = useState(false);
   const [cancelOrderId, setCancelOrderId] = useState(null);
@@ -60,8 +60,8 @@ function App() {
   async function load() {
     setLoading(true);
     try {
-      const [account, p, o, s, c, pen, tks, pg] = await Promise.all([api('/me'), api('/seller/products'), api('/seller/orders'), api('/seller/summary'), api('/categories'), api('/seller/penalties'), api('/seller/support'), api('/panel/pages')]);
-      setMe(account); setProducts(p); setOrders(o); setSummary(s); setCategories(c); setPenalties(pen); setTickets(tks); setHiddenPages(pg.hidden || []);
+      const [account, p, o, s, c, pen, tks, pg, rf] = await Promise.all([api('/me'), api('/seller/products'), api('/seller/orders'), api('/seller/summary'), api('/categories'), api('/seller/penalties'), api('/seller/support'), api('/panel/pages'), api('/seller/refunds')]);
+      setMe(account); setProducts(p); setOrders(o); setSummary(s); setCategories(c); setPenalties(pen); setTickets(tks); setHiddenPages(pg.hidden || []); setRefunds(rf);
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
   useEffect(() => { if (session) load(); }, [session]);
@@ -71,8 +71,8 @@ function App() {
   // API rate-limits per IP). Paused while a modal is open so a reload never
   // yanks a form out from under someone mid-edit.
   async function refresh() {
-    const [o, s] = await Promise.all([api('/seller/orders'), api('/seller/summary')]);
-    setOrders(o); setSummary(s);
+    const [o, s, rf] = await Promise.all([api('/seller/orders'), api('/seller/summary'), api('/seller/refunds')]);
+    setOrders(o); setSummary(s); setRefunds(rf);
   }
   const pollingRef = useRef(false);
   useEffect(() => {
@@ -98,7 +98,7 @@ function App() {
   // yet -- NTSA's own stock never shows up here, only ever the seller's own.
   const toPack = orders.filter(o => o.status === 'PLACED' && !o.packedAt);
   // Overview is always on; the admin can hide any of the rest from the Pages screen.
-  const allNav = [['Overview', LayoutDashboard, 'overview'], ['My products', Package, 'products'], ['My orders', ShoppingBag, 'orders'], ['To pack', PackageCheck, 'topack'], ['Support', LifeBuoy, 'support'], ['Settings', SettingsIcon, 'settings']];
+  const allNav = [['Overview', LayoutDashboard, 'overview'], ['My products', Package, 'products'], ['My orders', ShoppingBag, 'orders'], ['Returns', RotateCcw, 'returns'], ['To pack', PackageCheck, 'topack'], ['Support', LifeBuoy, 'support'], ['Settings', SettingsIcon, 'settings']];
   const nav = allNav.filter(([, , key]) => key === 'overview' || !hiddenPages.includes(key));
   const unreadCount = notifs.filter(n => !n.readAt).length;
   // Jump to the order a notification is about, if it's one of this shop's lines.
@@ -108,6 +108,8 @@ function App() {
     if (line) { go('My orders'); setOrderView(line); }
   }
   const problemOrders = orders.filter(hasProblem);
+  // Only the undecided ones are worth a badge -- a settled return is history.
+  const pendingReturns = refunds.filter(r => r.status === 'REQUESTED');
   const openTickets = tickets.filter(t => t.status === 'OPEN').length;
   const shown = products.filter(p => `${p.name} ${p.category?.name}`.toLowerCase().includes(query.toLowerCase()));
   // Units sold per product (cancelled lines left out), so the list can show
@@ -124,7 +126,7 @@ function App() {
     <aside className={mobileNav ? 'sidebar open' : 'sidebar'}>
       <div className="brand"><img className="brand-logo" src="/ntsa_logo.png" alt="NTSA"/></div>
       <div className="workspace-label">SELLER WORKSPACE</div>
-      <nav>{nav.map(([name, Icon]) => <button key={name} className={page === name ? 'nav-item active' : 'nav-item'} onClick={() => go(name)}><Icon size={19}/><span>{name}</span>{name === 'My orders' && orders.length > 0 && <small>{orders.length}</small>}{name === 'To pack' && toPack.length > 0 && <small>{toPack.length}</small>}{name === 'Support' && openTickets > 0 && <small>{openTickets}</small>}</button>)}</nav>
+      <nav>{nav.map(([name, Icon]) => <button key={name} className={page === name ? 'nav-item active' : 'nav-item'} onClick={() => go(name)}><Icon size={19}/><span>{name}</span>{name === 'My orders' && orders.length > 0 && <small>{orders.length}</small>}{name === 'Returns' && pendingReturns.length > 0 && <small>{pendingReturns.length}</small>}{name === 'To pack' && toPack.length > 0 && <small>{toPack.length}</small>}{name === 'Support' && openTickets > 0 && <small>{openTickets}</small>}</button>)}</nav>
       <div className="sidebar-note"><ShieldCheck size={24}/><strong>{me?.onHoliday ? 'You are on holiday.' : 'Your shop on NTSA.'}</strong><p>{me?.onHoliday ? 'Deliveries are quoted a little later. Come back within 3 days or your products hide from shoppers.' : 'Going away? Put your shop on hold so deliveries are quoted later.'}</p><button className="text-button" style={{ color: me?.onHoliday ? '#ffb45d' : '#86a4b5', marginTop: 10 }} disabled={busy} onClick={() => me?.onHoliday ? action(() => api('/seller/holiday', { method: 'POST', body: { onHoliday: false } }), 'Welcome back — your shop is live') : setHolidayOpen(true)}>{me?.onHoliday ? 'End holiday & go live' : 'Go on holiday'}</button></div>
       <button className="nav-item signout" onClick={logout}><LogOut size={18}/>Sign out</button>
     </aside>
@@ -263,6 +265,8 @@ function App() {
             <div className="panel-heading"><div><h2>My orders <span className="count">{orders.length}</span></h2><p>Every line a buyer has ordered from your shop. Click one to track it. NTSA packs and delivers.</p></div><div className="row-actions"><button className={`filter-toggle ${problemsOnly ? 'on' : ''}`} onClick={() => setProblemsOnly(!problemsOnly)}>Needs attention ({problemOrders.length})</button><button className="text-button" onClick={load}>Refresh</button></div></div>
             <OrderTable orders={problemsOnly ? problemOrders : orders} full onCancel={setCancelOrderId} onOpen={setOrderView}/>
           </section>}
+
+          {page === 'Returns' && <SellerReturnsPage refunds={refunds} pending={pendingReturns} onRefresh={load}/>}
 
           {page === 'To pack' && <section className="panel">
             <div className="panel-heading"><div><h2>To pack <span className="count">{toPack.length}</span></h2><p>Pack your own lines and tick them off. NTSA still delivers everything.</p></div><button className="text-button" onClick={load}>Refresh</button></div>
@@ -480,7 +484,9 @@ function StatusDonut({ orders }) {
   </div>;
 }
 // Courier trouble a seller should spot at a glance, from the journey events.
-const BAD_EVENTS = ['DELIVERY_FAILED', 'RTO_INITIATED', 'RTO_DELIVERED', 'ISSUE_REPORTED'];
+// 'REFUND_REQUESTED' is a notification type rather than a shipment status, but
+// it belongs in the same red: the seller should read it the same way.
+const BAD_EVENTS = ['DELIVERY_FAILED', 'RTO_INITIATED', 'RTO_DELIVERED', 'ISSUE_REPORTED', 'REFUND_REQUESTED'];
 const ISSUE_LABEL = { NOT_RECEIVED: 'Not received', DAMAGED: 'Damaged', WRONG_ITEM: 'Wrong item', OTHER: 'Other' };
 const hasProblem = o => (o.openIssues?.length > 0) || (o.events || []).some(e => BAD_EVENTS.includes(e.status));
 function OrderChips({ order }) {
@@ -489,6 +495,32 @@ function OrderChips({ order }) {
     {order.openIssues?.length > 0 && <span className="chip">Customer problem</span>}
     {has('RTO_DELIVERED') ? <span className="chip">Returned to you</span> : has('RTO_INITIATED') ? <span className="chip">Being returned</span> : has('DELIVERY_FAILED') && !has('DELIVERED') && <span className="chip">Delivery failed</span>}
   </>;
+}
+// Everything a customer has asked to send back from this shop, why, and where
+// the refund has got to. Read-only on purpose: approving or rejecting a refund
+// is NTSA's call, so the seller gets the facts and the reason, not buttons.
+const REFUND_LABEL = { REQUESTED: 'Being decided', APPROVED: 'Refunded to customer', REJECTED: 'Request rejected' };
+function SellerReturnsPage({ refunds, pending, onRefresh }) {
+  const [pendingOnly, setPendingOnly] = useState(false);
+  const shown = pendingOnly ? pending : refunds;
+  const day = d => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  return <section className="panel">
+    <div className="panel-heading">
+      <div><h2>Returns <span className="count">{refunds.length}</span></h2><p>Items customers have asked to send back, and what has happened to each refund. NTSA reviews every one — an approved refund is credited to the customer's wallet.</p></div>
+      <div className="row-actions"><button className={`filter-toggle ${pendingOnly ? 'on' : ''}`} onClick={() => setPendingOnly(!pendingOnly)}>Still being decided ({pending.length})</button><button className="text-button" onClick={onRefresh}>Refresh</button></div>
+    </div>
+    {shown.length ? <div className="table-scroll"><table>
+      <thead><tr><th>Item</th><th>Order</th><th>Customer</th><th>Why it is coming back</th><th>Refund amount</th><th>Status</th></tr></thead>
+      <tbody>{shown.map(r => <tr key={r.id}>
+        <td><div className="product-cell">{r.image ? <img className="product-image" src={r.image} alt=""/> : <div className="product-image placeholder"><Package/></div>}<div><strong>{r.name}</strong>{(r.size || r.color || r.grade) && <small>{[r.size, r.color, r.grade].filter(Boolean).join(' · ')}</small>}<small>{r.quantity} pc</small></div></div></td>
+        <td><strong>#{r.orderId.slice(-8).toUpperCase()}</strong><small>Ordered {day(r.placedAt)}</small>{r.deliveredAt && <small>Delivered {day(r.deliveredAt)}</small>}</td>
+        <td>{r.buyerName ? <strong>{r.buyerName}</strong> : <span className="muted">—</span>}<small>{r.buyer}</small></td>
+        <td>{r.reason}</td>
+        <td>{money(r.amountPaise)}</td>
+        <td><Badge>{REFUND_LABEL[r.status] || r.status}</Badge><small>Asked {day(r.requestedAt)}</small>{r.reviewedAt && <small>Decided {day(r.reviewedAt)}</small>}</td>
+      </tr>)}</tbody>
+    </table></div> : <Empty text={refunds.length ? 'Nothing waiting on a decision' : 'Nothing has been sent back to you — good news'}/>}
+  </section>;
 }
 function OrderTable({ orders, full, onCancel, onOpen }) {
   return orders.length ? <div className="table-scroll"><table>

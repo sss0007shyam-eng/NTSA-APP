@@ -6,9 +6,10 @@ import { randomInt, timingSafeEqual } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { db, atomic } from './db.js';
 import { config } from './config.js';
-import { z, productSchema, addressSchema, vendorCreateSchema, vendorUpdateSchema, vendorPasswordSchema, vendorMessageSchema, bannerSchema, reviewSchema, adminReviewSchema, couponSchema, staffCreateSchema, staffUpdateSchema, sellerApplicationSchema, sellerApproveSchema, sellerUpdateSchema, sellerDeviceLoginSchema, sellerOtpSchema, blockedPincodeSchema, deliveryRuleSchema, courierPartnerSchema, courierPartnerUpdateSchema, settingsSchema, invoiceExtrasSchema, panelPagesSchema, blockedAreaSchema } from './lib/validation.js';
+import { z, productSchema, addressSchema, vendorCreateSchema, vendorUpdateSchema, vendorPasswordSchema, vendorMessageSchema, bannerSchema, reviewSchema, adminReviewSchema, couponSchema, staffCreateSchema, staffUpdateSchema, sellerApplicationSchema, sellerApproveSchema, sellerUpdateSchema, sellerDeviceLoginSchema, sellerOtpSchema, blockedPincodeSchema, deliveryRuleSchema, courierPartnerSchema, courierPartnerUpdateSchema, settingsSchema, invoiceExtrasSchema, panelPagesSchema, blockedAreaSchema, shopQuerySchema, gstNumberSchema, verificationKindSchema } from './lib/validation.js';
 import { requireThat, holidayGraceCutoff, HttpError } from './lib/rules.js';
 import { rankByImage, visualSearchEnabled } from './services/visualSearch.js';
+import { interpretQuery, searchTerms, describeQuery, pickResults } from './lib/shopQuery.js';
 import { variantFor, priceFor, publicSizePrices } from './lib/variants.js';
 import { auth, roles, tokenFor } from './services/auth.js';
 import { verifyCustomer, pushToUser } from './services/firebase.js';
@@ -19,6 +20,8 @@ import { uploadImage, uploadAttachment } from './services/storage.js';
 import { gateway, validSignature } from './services/payments.js';
 import { checkout, ownedOrder, publicOrder, orderInclude, ownerWhere, changeStatus, cancelOrder, CANCELLABLE_BY_BUYER, deliveryCode, deliver, requestRefund, reviewRefund, assertDeliverable } from './services/orders.js';
 import { streamInvoice, invoiceNumberFor } from './services/invoice.js';
+import { verifyGstin, verifyAadhaar, gstProviderConfigured, aadhaarProviderConfigured } from './services/verification.js';
+import { isVerifiedOutcome } from './lib/verification.js';
 export const router = Router();
 const admin = roles('ADMIN'), customer = roles('CUSTOMER'), buyer = roles('CUSTOMER', 'VENDOR');
 // Panel staff: packing sees the orders to pack, sales signs up new sellers.
@@ -27,6 +30,9 @@ const panel = roles('ADMIN', 'PACKING', 'SALES', 'SUPPORT');
 const loginLimiter = rateLimit({ windowMs: 15 * 60000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
 const safeVendor = v => { const { passwordHash, sessionVersion, ...safe } = v; return safe; };
 const safeStaff = a => { const { passwordHash, sessionVersion, ...safe } = a; return safe; };
+// Enough recent portal checks for the panel to show the latest GST and the
+// latest Aadhaar answer per row, without pulling a whole history into a list.
+const LAST_CHECKS = { orderBy: { checkedAt: 'desc' }, take: 6 };
 const notify = (audience, type, title, body, entityId) => db.notification.create({ data: { audience, type, title, body, entityId } });
 async function customerSession(firebase) {
   const user = await db.user.upsert({ where: { firebaseUid: firebase.uid }, update: {}, create: { firebaseUid: firebase.uid, name: firebase.name || '', email: firebase.email, phone: firebase.phone_number, wallet: { create: {} } } });
@@ -174,6 +180,45 @@ router.post('/products/visual-search', visualLimiter, photoUpload, async (req, r
   const best = ranked[0]?.score ?? 0;
   const picked = ranked.filter((r, i) => i < 3 || r.score >= Math.max(0.2, best * 0.45)).slice(0, 12);
   res.json({ confident: best >= 0.45, products: picked.map(r => storefrontRow(r.product)) });
+});
+// The shopping assistant: the shopper types what they're after in their own
+// words ("mujhe white jute lene hain aur 1500 ka mera budget hai") and gets
+// real catalog products back, plus `summary` -- how the sentence was read --
+// so a wrong guess is visible and can be retyped instead of silently
+// returning the wrong shelf. The reading itself is lib/shopQuery.js; this
+// route is only the catalog query, and it is the same storefront query as
+// GET /products, so the same rules hold: live products only, nothing
+// wholesale-only, a shop on holiday hidden, and no wholesale price in the
+// response (storefrontRow strips it).
+const assistLimiter = rateLimit({ windowMs: 60000, limit: 40, standardHeaders: 'draft-8', legacyHeaders: false });
+router.post('/products/assist', assistLimiter, async (req, res) => {
+  const { query } = shopQuerySchema.parse(req.body ?? {});
+  const categories = await db.category.findMany({ select: { id: true, name: true } });
+  const parsed = await interpretQuery(query, categories);
+  const terms = searchTerms(parsed);
+  // Retrieval is deliberately wide -- any term, or the guessed category --
+  // because the narrowing happens in pickResults, which can loosen a
+  // constraint and say that it did rather than show an empty screen.
+  const match = [
+    ...terms.flatMap(t => [{ name: { contains: t, mode: 'insensitive' } }, { description: { contains: t, mode: 'insensitive' } }]),
+    ...(parsed.categoryId ? [{ categoryId: parsed.categoryId }] : []),
+  ];
+  const products = await db.product.findMany({
+    where: { active: true, audience: { in: ['RETAIL', 'BOTH'] }, AND: [{ OR: onSaleSellerOr() }, ...(match.length ? [{ OR: match }] : [])] },
+    include: { category: true, reviews: { select: { rating: true } } }, take: 200,
+  });
+  const { products: picked, relaxed } = pickResults(products.map(storefrontRow), parsed);
+  res.json({
+    query,
+    // What it searched for, spelled out and in parts, so the app can show the
+    // sentence back in the shopper's own language.
+    summary: describeQuery(parsed),
+    understood: { color: parsed.color, item: parsed.item?.label ?? null, category: parsed.categoryName, minRupees: parsed.minRupees, maxRupees: parsed.maxRupees, keywords: parsed.keywords },
+    // null when everything asked for was met; otherwise the constraint that
+    // had to be dropped ('color', 'budget', 'all'), or 'none' for no matches.
+    relaxed,
+    products: picked,
+  });
 });
 router.get('/products/:id', async (req, res) => {
   const p = await db.product.findFirst({ where: { id: req.params.id, active: true, audience: { in: ['RETAIL', 'BOTH'] }, OR: onSaleSellerOr() }, include: { category: true, reviews: { select: { rating: true, comment: true, images: true, createdAt: true, authorName: true, user: { select: { name: true } } }, take: 100, orderBy: { createdAt: 'desc' } } } });
@@ -338,8 +383,19 @@ router.post('/orders/:id/cancel', buyer, async (req, res) => {
 router.post('/orders/:id/refunds', customer, async (req, res) => {
   const { itemId, reason } = z.object({ itemId: z.string(), reason: z.string().trim().min(5).max(1000) }).parse(req.body);
   const order = await ownedOrder(req.actor, req.params.id);
-  requireThat(order.items.some(i => i.id === itemId), 404, 'Order item not found');
-  res.status(201).json(await requestRefund(req.actor, itemId, reason));
+  const line = order.items.find(i => i.id === itemId);
+  requireThat(line, 404, 'Order item not found');
+  const refund = await requestRefund(req.actor, itemId, reason);
+  // The shop whose item is coming back hears it straight away, the same way
+  // the courier's own bad news reaches them (SELLER_ALERT in services/
+  // shipping.js) -- a return is theirs to answer for, and learning of it as a
+  // number on their summary is too late. Only that one shop is told; another
+  // seller's line in the same order is none of their business.
+  if (line.sellerId) {
+    await notify(`SELLER:${line.sellerId}`, 'REFUND_REQUESTED', 'A customer wants to return your item',
+      `${line.name} in order #${order.id.slice(0, 10).toUpperCase()}: "${reason}". NTSA will review the refund.`, order.id);
+  }
+  res.status(201).json(refund);
 });
 router.post('/orders/:id/payment', buyer, async (req, res) => {
   const order = await ownedOrder(req.actor, req.params.id);
@@ -1099,7 +1155,7 @@ router.put('/admin/coupons/:id', async (req, res) => {
   res.json(await db.coupon.update({ where: { id: req.params.id }, data: { ...data, expiresAt: data.expiresAt ? new Date(data.expiresAt) : null } }));
 });
 router.delete('/admin/coupons/:id', async (req, res) => { await db.coupon.delete({ where: { id: req.params.id } }); res.status(204).end(); });
-router.get('/admin/vendors', async (req, res) => res.json((await db.vendor.findMany({ where: { deleted: false }, include: { limits: true }, orderBy: { createdAt: 'desc' } })).map(safeVendor)));
+router.get('/admin/vendors', async (req, res) => res.json((await db.vendor.findMany({ where: { deleted: false }, include: { limits: true, verificationChecks: LAST_CHECKS }, orderBy: { createdAt: 'desc' } })).map(safeVendor)));
 router.post('/admin/vendors', async (req, res) => {
   const data = vendorCreateSchema.parse(req.body);
   const vendor = await db.vendor.create({ data: {
@@ -1170,10 +1226,97 @@ router.post('/admin/order-items/:itemId/pack', async (req, res) => {
 });
 // Sellers the admin has approved: their logins are handed out here, so
 // they are enabled, disabled and reset here too.
+// --- "Verify from portal" ------------------------------------------------
+// The gstVerified / aadharVerified tick-boxes are untouched by any of this and
+// still save through the ordinary PATCH: an admin with the paperwork in front
+// of them does not need a portal. These routes are the other half the client
+// asked for -- a button pressed when the admin wants the real portal asked,
+// with the answer kept.
+//
+// Admin-only comes from `router.use('/admin', admin)` above. That is not
+// incidental: a GST lookup costs money per call and its answer is a judgement
+// about a seller, so the sales and support desks do not get it.
+const DEFINITE_NO = ['MISMATCH', 'INACTIVE', 'NOT_FOUND'];
+// Written once for sellers and for wholesale partners, because the only real
+// differences are which table the row is in and which names NTSA has on file
+// for the portal's answer to be compared against.
+async function portalCheck({ kind, model, link, row, namesOnFile, actorName }) {
+  const number = kind === 'GST' ? row.gstNumber : row.aadharNumber;
+  const label = kind === 'GST' ? 'GST' : 'Aadhaar';
+  requireThat(number, 400, `There is no ${label} number on file to check. Add it first, then verify.`);
+  // A paid lookup is not spent on a number that cannot be real, and "the
+  // number on file is malformed" is a more useful answer than the portal's.
+  if (kind === 'GST') requireThat(gstNumberSchema.safeParse(number).success, 400, 'The GST number on file is not a valid 15-character GSTIN. Correct it before checking the portal.');
+  const result = kind === 'GST' ? await verifyGstin(number, namesOnFile) : await verifyAadhaar();
+  const check = await db.verificationCheck.create({ data: {
+    kind: verificationKindSchema.parse(kind), ...link,
+    outcome: result.outcome,
+    provider: result.provider,
+    // Only a GST number is recorded. It is public business information,
+    // whereas copying an Aadhaar number into a second table would spread
+    // exactly the data NTSA should be holding less of.
+    subject: kind === 'GST' ? number : null,
+    legalName: result.legalName ?? null,
+    tradeName: result.tradeName ?? null,
+    registrationStatus: result.registrationStatus ?? null,
+    address: result.address ?? null,
+    nameOnFile: namesOnFile.filter(Boolean).join(' / ') || null,
+    nameMatch: result.nameMatch ?? null,
+    message: result.message ?? null,
+    checkedByName: actorName || null,
+  } });
+  // The portal is the authority on a GSTIN, so its answer moves the tick: up
+  // on a confirmed match, and back down on a definite no. A green tick sitting
+  // beside "registered to a different name" is the single thing this feature
+  // exists to prevent.
+  //
+  // An UNAVAILABLE or ERROR check moves nothing. No portal answered, so the
+  // admin's own tick is still the only thing NTSA knows -- and a check that
+  // did not happen must never read as one that did.
+  let verified = kind === 'GST' ? row.gstVerified : row.aadharVerified;
+  if (kind === 'GST') {
+    if (isVerifiedOutcome(result.outcome)) verified = true;
+    else if (DEFINITE_NO.includes(result.outcome)) verified = false;
+    if (verified !== row.gstVerified) await model.update({ where: { id: row.id }, data: { gstVerified: verified } });
+  }
+  // A mismatch is the fraud signal, so it is pushed at the admin rather than
+  // left sitting for whoever next happens to open this row.
+  if (DEFINITE_NO.includes(result.outcome)) {
+    const said = result.outcome === 'MISMATCH' ? `registered to "${check.legalName || check.tradeName || 'another name'}"`
+      : result.outcome === 'INACTIVE' ? `as ${check.registrationStatus || 'not active'}`
+      : 'unknown to the portal';
+    await notify('ADMIN', 'VERIFICATION_FAILED', `${label} check failed`, `${label} ${number} for ${row.shopName || row.name} came back ${said}.`, row.id);
+  }
+  return { check, verified, providerConfigured: kind === 'GST' ? gstProviderConfigured() : aadhaarProviderConfigured() };
+}
+// Two routes per subject rather than one with a `:kind` parameter, so the URL
+// says what it does and a future Aadhaar path can diverge freely.
+const verifyRoutes = (path, load) => {
+  for (const [suffix, kind] of [['verify-gst', 'GST'], ['verify-aadhaar', 'AADHAAR']]) {
+    router.post(`${path}/:id/${suffix}`, async (req, res) => {
+      const { model, row, namesOnFile, link } = await load(req.params.id);
+      requireThat(row, 404, 'Not found');
+      res.json(await portalCheck({ kind, model, link, row, namesOnFile, actorName: req.actor.account.name }));
+    });
+  }
+};
+verifyRoutes('/admin/sellers', async id => {
+  const row = await db.seller.findFirst({ where: { id, deleted: false } });
+  // A shop is often registered under its owner's personal name, so either one
+  // matching is a legitimate match (see nameMatch in lib/verification.js).
+  return { model: db.seller, row, link: { sellerId: id }, namesOnFile: [row?.shopName, row?.ownerName] };
+});
+verifyRoutes('/admin/vendors', async id => {
+  const row = await db.vendor.findFirst({ where: { id, deleted: false } });
+  return { model: db.vendor, row, link: { vendorId: id }, namesOnFile: [row?.name] };
+});
+// Whether the buttons can do anything at all, so the panel can say "no
+// provider is configured" before the admin presses one instead of after.
+router.get('/admin/verification/providers', async (req, res) => res.json({ gst: gstProviderConfigured(), aadhaar: aadhaarProviderConfigured() }));
 router.get('/admin/sellers', async (req, res) => {
   const sellers = await db.seller.findMany({
     where: { deleted: false },
-    include: { _count: { select: { products: { where: { active: true } }, items: true } }, application: { select: { address: true } } },
+    include: { _count: { select: { products: { where: { active: true } }, items: true } }, application: { select: { address: true } }, verificationChecks: LAST_CHECKS },
     orderBy: { createdAt: 'desc' },
   });
   res.json(sellers.map(({ passwordHash, sessionVersion, ...safe }) => safe));
@@ -1358,6 +1501,37 @@ router.post('/seller/orders/:id/cancel', seller, async (req, res) => {
     notify('PACKING', 'ORDER_CANCELLED', 'Do not pack this order', `Order ${short} was cancelled by the seller: ${reason}`, order.id),
   ]);
   res.json(order);
+});
+// Returns on this shop's own items: what came back, why the customer sent it
+// back, what it's worth, and whether NTSA has decided yet. Read-only -- a
+// refund is the admin's call to approve or reject, never the seller's.
+// Scoped through the order line's own `sellerId`, exactly the way
+// `/seller/orders` is, so another shop's line in the same order is never
+// reachable from here. No photos ride along: nothing in the return request
+// collects any yet (see `POST /orders/:id/refunds`).
+router.get('/seller/refunds', seller, async (req, res) => {
+  const refunds = await db.refund.findMany({
+    where: { orderItem: { sellerId: req.actor.id } },
+    include: { orderItem: { include: {
+      order: { select: { id: true, status: true, createdAt: true, deliveredAt: true, address: true, vendorId: true } },
+      product: { select: { images: true } },
+    } } },
+    orderBy: { createdAt: 'desc' }, take: 200,
+  });
+  // One flat row per return, shaped like the orders list so the panel reads
+  // them the same way. The buyer's name comes off the order's own address
+  // snapshot; the rest of the address stays out, because NTSA collects the
+  // parcel, not the seller.
+  res.json(refunds.map(({ orderItem: item, ...refund }) => ({
+    id: refund.id, status: refund.status, reason: refund.reason,
+    requestedAt: refund.createdAt, reviewedAt: refund.reviewedAt,
+    orderItemId: item.id, orderId: item.orderId, orderStatus: item.order.status,
+    name: item.name, size: item.size, color: item.color, grade: item.grade, quantity: item.quantity,
+    image: item.product.images[0] ?? null,
+    amountPaise: item.unitPaise * item.quantity,
+    buyerName: item.order.address?.name || null, buyer: item.order.vendorId ? 'Wholesale' : 'Customer',
+    placedAt: item.order.createdAt, deliveredAt: item.order.deliveredAt,
+  })));
 });
 // What the shop has earned: cancelled orders don't count, and money is only
 // counted as earned once the order is delivered. `earnedPaise` is net, after

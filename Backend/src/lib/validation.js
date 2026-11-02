@@ -58,6 +58,10 @@ export const productSchema = z.object({ name: text, description: z.string().trim
   }, 'Give every option its own price, or leave them all blank to charge the same for each')
   .refine(v => Object.values(v.sizePrices ?? {}).every(o => o.wholesalePaise <= o.pricePaise), 'An option\'s wholesale price cannot exceed its retail price')
   .refine(v => Object.values(v.sizePrices ?? {}).every(o => !o.mrpPaise || o.mrpPaise >= o.pricePaise), 'An option\'s MRP cannot be lower than its selling price');
+// One sentence typed into the shopping assistant, e.g. "mujhe white jute lene
+// hain aur 1500 ka mera budget hai". Capped at a sentence's worth: anything
+// longer is someone pasting, not shopping.
+export const shopQuerySchema = z.object({ query: z.string().trim().min(1).max(200) });
 export const reviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
   comment: z.string().trim().min(1).max(1000),
@@ -154,6 +158,16 @@ export const staffUpdateSchema = z.object({
   role: staffRole.optional(),
   enabled: z.boolean().optional(),
 });
+// A GSTIN on its own. Needed as its own schema because the admin panel can
+// now spend a paid portal lookup on whatever number is stored on a seller or
+// a wholesale partner -- rejecting a malformed one here saves the call and
+// tells the admin what is actually wrong.
+export const gstNumberSchema = z.string().trim().toUpperCase()
+  .regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/, 'Enter a valid 15-character GST number');
+// Which portal the admin asked about. Aadhaar is accepted even though no
+// provider can answer it today, so the refusal is recorded against the right
+// kind rather than the route pretending the button does not exist.
+export const verificationKindSchema = z.enum(['GST', 'AADHAAR']);
 // A shopkeeper the sales team signs up; the admin checks the details and
 // hands out seller panel credentials.
 export const sellerApplicationSchema = z.object({

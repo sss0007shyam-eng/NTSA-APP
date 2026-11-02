@@ -97,6 +97,73 @@ Delivery OTP: right now the Backend still generates its own OTP, which the
 customer shows the rider. Most couriers send their own OTP instead — once a real
 courier is signed up, decide which one is in charge and turn the other off.
 
+## GST / Aadhaar verification: what is real and what is not
+
+The admin panel has always had `gstVerified` / `aadharVerified` tick-boxes on
+a seller and on a wholesale partner. Those stay, and they mean exactly one
+thing: **an admin looked at the document**. Beside them there is now a
+**"Verify from portal"** button, which is the separate, dated record of what a
+government portal actually said.
+
+### GST — real, but it needs a paid key
+
+- `GST_VERIFY_API_KEY` in the Backend environment switches the button on.
+  **Left blank the button still works and still records the attempt**, with
+  the outcome `UNAVAILABLE` and a sentence telling the admin no provider is
+  configured. It never shows a tick for a check that did not happen.
+- There is **no free GSTN endpoint**. The government portal's own taxpayer
+  search is a captcha'd web form, and `api.gst.gov.in` is reachable only
+  through a licensed GST Suvidha Provider (GSP). The realistic route for NTSA
+  is a reseller fronting a GSP, billed roughly Rs 0.40-0.80 per lookup.
+  `services/verification.js` speaks the Appyflow shape (one GET); any other
+  reseller is a few lines beside it.
+- The **outcome is stored, not a boolean** (`VerificationCheck`): legal name,
+  trade name, registration status, principal address, who pressed the button
+  and when. The answer that matters is `MISMATCH` — a GSTIN that is live but
+  **registered to a different name**. That is the fraud signal, and it also
+  raises an admin notification.
+- For a GSTIN the portal is the authority, so a `VERIFIED` result ticks
+  `gstVerified` and a `MISMATCH` / `INACTIVE` / `NOT_FOUND` un-ticks it. An
+  `UNAVAILABLE` or `ERROR` check changes nothing.
+- Name matching lives in `lib/verification.js`. Honorifics and legal suffixes
+  are ignored ("M/S Rajesh Kumar Traders Pvt Ltd" matches "Rajesh Traders"),
+  trade words deliberately are **not** — "Rajesh Traders" and "Rajesh Stores"
+  must stay different businesses.
+
+### Aadhaar — NOT verifiable, by design, and this is not a TODO
+
+The Aadhaar button exists and records an attempt, but it always comes back
+`UNAVAILABLE` with the reason. **No fake check was built.** Online Aadhaar
+authentication/eKYC requires a UIDAI **AUA/KUA licence** (or riding as a
+sub-AUA under a bank or licensed KYC provider), with an audited Aadhaar Data
+Vault and per-slab licence fees — not something NTSA holds. So the Aadhaar
+tick-box means, and now says in the panel, "**I have seen the document**".
+
+The two routes that need **no** UIDAI licence, if the client ever wants a real
+check, are: (a) **Aadhaar Paperless Offline e-KYC**, where the *resident*
+downloads a share-code-protected XML/QR from UIDAI themselves and NTSA just
+verifies UIDAI's signature on it, and (b) a **DigiLocker** partner
+integration via API Setu, which needs NTSA to be onboarded as a partner
+organisation. Both change what the seller has to do at signup, so neither was
+guessed at. `services/verification.js` has the seam ready.
+
+### Storing full Aadhaar numbers — tell the client
+
+`Seller.aadharNumber`, `Vendor.aadharNumber` and
+`SellerApplication.aadharNumber` all hold the **full 12 digits** today, and
+that is the wrong shape. The Aadhaar (Authentication and Offline Verification)
+Regulations require an Aadhaar number to be **masked** before a copy is stored
+(first 8 digits redacted, last 4 visible), entities that may legitimately hold
+the number must keep it in an audited **Aadhaar Data Vault**, and an offline
+verification-seeking entity may not store the number at all. Section 29(4) of
+the Aadhaar Act also bars publishing or displaying it, and Chapter VII makes
+unauthorised use of identity information an offence.
+
+**The safe shape**: store only the last 4 digits for recognition, plus the
+uploaded document reference, and drop the other 8. This is a schema migration
+and a data cleanup, so it was flagged rather than done quietly — it changes
+what is already in the live database. Get the client's sign-off and then do it.
+
 ## Important gotchas learned the hard way
 
 1. **Render Static Site "Redirects/Rewrites" do NOT reliably proxy POST request bodies to an external destination.** We initially tried routing the admin panel's `/api/*` calls through a Rewrite rule to the backend — logins silently failed (POST arrived at the backend as something that didn't match the login route, backend's `auth` middleware then threw `"Please sign in again"`). The actual fix: `Frontend/web/src/api.js` now reads `import.meta.env.VITE_API_URL` (falls back to relative `/api` for local dev, where Vite's own dev-server proxy handles it) and calls the backend's real URL directly, with CORS configured on the backend (`CORS_ORIGIN` = the admin panel's exact origin). Don't re-introduce a static-site rewrite for API calls.
@@ -120,7 +187,8 @@ See `NTSA-APP-LAYOUT-IMG/NTSA-External-Services-Required.pdf` if that folder sti
 - Admin-defined custom product attributes (free-form spec rows, e.g. "Capacity: 20L") — shown as "Specifications" on the product page.
 - Wholesale portal rebuilt with its own bottom nav (Home/Categories/Messages/Settings), matching the retail app's banner slider and category browsing.
 - Vendor ↔ Admin messaging (`VendorMessage` model, `/vendor/messages` + `/admin/vendors/:id/messages` endpoints, chat UI in the app and in the admin panel).
-- An "AI Shopping Assistant" chat icon on the customer app — a keyword-search heuristic over the product catalog, not a real LLM (flagged as such in code comments), consistent with other stand-ins used here (no paid AI API key available).
+- A **Shopping Assistant** on the customer app (orange button, bottom right): the shopper types one plain sentence — "mujhe white jute lene hain aur 1500 ka mera budget hai" — and gets real catalog products back. `POST /api/products/assist` reads the sentence into filters (colour, budget, item type, leftover words) in `Backend/src/lib/shopQuery.js`, then runs the ordinary storefront query, so the same rules hold as `GET /products`: live products only, nothing wholesale-only, no dealer prices, a shop on holiday hidden. It also returns `summary` ("White · Shoes · under ₹1,500") and `relaxed` (which constraint had to be dropped to find anything), both of which the chat screen shows, so a misread word is visible to the shopper rather than silently returning the wrong shelf.
+  **There is no language model here and the feature does not need one.** Hindi/Hinglish item words ("jute", "kapde", "ghadi") and Indian money phrasing ("1500 ka", "2 hazaar se kam", "₹1500 tak", "500 se 1500 ke beech") are in the lexicon in `shopQuery.js`; add words there as the catalog grows. `interpretQuery()` at the bottom of that file is the one seam a model would ever be called from — sentence in, the same filters out — with the parser left as the fallback. Tests: `Backend/test/shop-assistant.test.js`, `Frontend/customer/test/assistant_test.dart`.
 
 ## Local dev quick-start (if not just using the Render deployment)
 

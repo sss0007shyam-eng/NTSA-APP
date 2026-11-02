@@ -33,7 +33,7 @@ const DEFAULT_INVOICE_COLUMNS = [
 // A panel's first/home page isn't listed -- it always stays. The key is what's
 // stored; the label is what both the Pages screen and the panel's nav use.
 const PANEL_CATALOG = {
-  SELLER: [['products', 'My products'], ['orders', 'My orders'], ['topack', 'To pack'], ['support', 'Support'], ['settings', 'Settings']],
+  SELLER: [['products', 'My products'], ['orders', 'My orders'], ['returns', 'Returns'], ['topack', 'To pack'], ['support', 'Support'], ['settings', 'Settings']],
   PACKING: [['packed', 'Packed'], ['cancelled', 'Cancelled']],
   SALES: [['mysellers', 'My sellers']],
   SUPPORT: [['sellerproducts', 'Seller products'], ['settings', 'Settings']],
@@ -457,7 +457,10 @@ function App() {
     {toast && <div role="status" className="toast"><Check size={18}/>{toast}</div>}
     {modal && <Modal title={({ Products: modal.data ? 'Edit product' : 'New product', 'Wholesale products': modal.data ? 'Edit wholesale product' : 'New wholesale product', Categories: modal.data ? 'Edit category' : 'New category', Vendors: modal.data ? 'Edit partner' : 'New wholesale partner', Sellers: `Edit ${modal.data?.shopName}`, Banners: modal.data ? 'Edit banner' : 'New banner', Coupons: modal.data ? 'Edit coupon' : 'New coupon', Order: 'Order details', Delete: 'Remove record', Reset: 'Reset vendor password', SellerReset: `Reset password · ${modal.data?.shopName}`, SellerDevices: `Devices · ${modal.data?.shopName}`, Messages: `Messages · ${modal.data?.name}`, Checkout: 'Place wholesale order', Pack: `Order #${modal.data?.id?.slice(0, 10).toUpperCase()}`, Staff: 'New staff login', StaffEdit: 'Edit staff login', StaffReset: 'Reset staff password', Application: modal.data?.shopName, Approve: `Approve ${modal.data?.shopName}`, Reject: `Reject ${modal.data?.shopName}`, Penalty: `Penalty · ${modal.data?.shopName}`, AdminReview: 'Add a review', ReportProduct: `Report to support · ${modal.data?.name}`, LateOrders: `Late orders (${lateOrders?.count ?? 0})` })[modal.type]} wide={modal.type === 'LateOrders'} close={() => !busy && setModal(null)}>
       {error && <div role="alert" className="alert">{error}</div>}
-      {['Products', 'Wholesale products', 'Categories', 'Vendors', 'Sellers', 'Banners', 'Coupons'].includes(modal.type) && <Editor type={modal.type} data={modal.data} categories={categories} busy={busy} onSubmit={body => action(async () => {
+      {['Products', 'Wholesale products', 'Categories', 'Vendors', 'Sellers', 'Banners', 'Coupons'].includes(modal.type) && <Editor type={modal.type} data={modal.data} categories={categories} busy={busy} onVerify={['Vendors', 'Sellers'].includes(modal.type) && modal.data ? ((kind, done) => action(async () => {
+        const r = await api(`/admin/${modal.type === 'Vendors' ? 'vendors' : 'sellers'}/${modal.data.id}/${kind === 'GST' ? 'verify-gst' : 'verify-aadhaar'}`, { method: 'POST' });
+        done(r.check);
+      }, 'Portal check recorded')) : null} onSubmit={body => action(async () => {
         const path = { Products: 'products', 'Wholesale products': 'products', Categories: 'categories', Vendors: 'vendors', Sellers: 'sellers', Banners: 'banners', Coupons: 'coupons' }[modal.type];
         await api(`/admin/${path}${modal.data ? `/${modal.data.id}` : ''}`, { method: modal.data ? (['Vendors', 'Sellers'].includes(modal.type) ? 'PATCH' : 'PUT') : 'POST', body });
         setModal(null);
@@ -999,7 +1002,54 @@ function Login({ onLogin }) {
   const [role, setRole] = useState('ADMIN'), [busy, setBusy] = useState(false), [error, setError] = useState('');
   return <div className="login"><section className="login-story"><div className="brand"><img className="brand-logo" src="/ntsa_logo.png" alt="NTSA"/></div><div><div className="eyebrow">GOOD BUSINESS STARTS HERE</div><h1>Everything you need.<br/><span>Room to grow.</span></h1><p>Your store, your partners, your next big idea.<br/>Bring it all together with NTSA.</p><div className="login-tags"><span><Check size={16}/>Simple operations</span><span><Check size={16}/>Stronger partnerships</span></div></div><small>Shop smarter. Live better.</small></section><section className="login-form"><div><div className="eyebrow">WELCOME TO YOUR WORKSPACE</div><h2>Let’s get you settled.</h2><p>Sign in to manage your everyday business.</p><div className="tabs"><button type="button" className={role === 'ADMIN' ? 'selected' : ''} onClick={() => { setRole('ADMIN'); setError(''); }}>Workspace team</button><button type="button" className={role === 'VENDOR' ? 'selected' : ''} onClick={() => { setRole('VENDOR'); setError(''); }}>Wholesale partner</button></div><form onSubmit={async e => { e.preventDefault(); setBusy(true); setError(''); const data = new FormData(e.target); try { const r = await api('/auth/login', { method: 'POST', body: { role, username: data.get('username'), password: data.get('password') } }); onLogin(r.token, r.role); } catch (err) { setError(err.message); } finally { setBusy(false); } }}><Field label={role === 'ADMIN' ? 'Email address' : 'Username'} name="username" type={role === 'ADMIN' ? 'email' : 'text'} placeholder={role === 'ADMIN' ? 'you@company.com' : 'Your assigned username'} required autoComplete="username"/><PasswordField label="Password" name="password" placeholder="Enter your password" required autoComplete="current-password"/>{error && <div role="alert" className="alert">{error}</div>}<Button disabled={busy}>{busy ? 'Signing in…' : 'Sign in to workspace'}<ArrowUpRight size={18}/></Button></form><p className="login-help"><ShieldCheck size={17}/>{role === 'ADMIN' ? 'Staff and admins sign in here.' : 'Your wholesale account is created by the NTSA team.'}</p></div></section></div>;
 }
-function Editor({ type, data, categories, busy, onSubmit }) {
+// The six answers a portal check can come back with. The vocabulary is the
+// backend's (Backend/src/lib/verification.js) -- this is only its wording.
+// Note what is NOT here: nothing but VERIFIED gets the green chip, so a check
+// that could not run never reads like one that passed.
+const OUTCOME_TEXT = {
+  VERIFIED: ['ok', 'Portal confirmed'],
+  MISMATCH: ['warn', 'Registered to a different name — check this'],
+  INACTIVE: ['warn', 'Registration is not active'],
+  NOT_FOUND: ['warn', 'The portal does not have this number'],
+  UNAVAILABLE: ['', 'Not checked — no portal check available'],
+  ERROR: ['', 'The check could not be completed'],
+};
+// The client's "ek button": a real check against the government portal, run
+// when the admin asks for it, sitting next to the tick they can still do by
+// hand. The two are deliberately not merged -- the tick means "I have seen
+// the paperwork", this means "the portal said this, on this date".
+//
+// The button is shown even when no provider is configured, because pressing
+// it then gives the admin the reason in writing rather than a dead control.
+function PortalVerify({ data, kinds, busy, onVerify }) {
+  const [providers, setProviders] = useState(null), [fresh, setFresh] = useState({});
+  useEffect(() => { api('/admin/verification/providers').then(setProviders).catch(() => setProviders({ gst: false, aadhaar: false })); }, []);
+  // A check just run beats the snapshot the list was loaded with.
+  const latest = kind => fresh[kind] || (data?.verificationChecks || []).find(c => c.kind === kind) || null;
+  return <div className="verify-box">
+    {kinds.map(([kind, label]) => {
+      const check = latest(kind), ready = providers?.[kind === 'GST' ? 'gst' : 'aadhaar'];
+      const [tone, text] = check ? (OUTCOME_TEXT[check.outcome] || ['', check.outcome]) : ['', 'Never checked against the portal'];
+      return <div key={kind} className="verify-row">
+        <div>
+          <strong>{label} · portal check</strong>
+          <small>
+            <span className={`verify-chip ${tone}`}>{text}</span>
+            {check && <> Checked {new Date(check.checkedAt).toLocaleString('en-IN')}{check.checkedByName ? ` by ${check.checkedByName}` : ''}.</>}
+            {check?.legalName && <> Portal name: <strong>{check.legalName}</strong>{check.tradeName && check.tradeName !== check.legalName ? ` (trading as ${check.tradeName})` : ''}{check.registrationStatus ? ` · ${check.registrationStatus}` : ''}.</>}
+            {check?.nameMatch === false && check.nameOnFile && <> NTSA has this account as <strong>{check.nameOnFile}</strong>.</>}
+            {check?.address && <> {check.address}</>}
+            {check?.message && <> {check.message}</>}
+          </small>
+        </div>
+        <button type="button" className="secondary" disabled={busy || providers === null} onClick={() => onVerify(kind, c => setFresh(f => ({ ...f, [kind]: c })))}>
+          {providers === null ? 'Loading…' : ready ? 'Verify from portal' : 'Why can’t this be checked?'}
+        </button>
+      </div>;
+    })}
+  </div>;
+}
+function Editor({ type, data, categories, busy, onSubmit, onVerify }) {
   const [images, setImages] = useState(data?.images?.join('\n') || ''), [uploading, setUploading] = useState(false), [error, setError] = useState('');
   const [videos, setVideos] = useState(data?.videos || []), [uploadingVideo, setUploadingVideo] = useState(false);
   const [colorImageMap, setColorImageMap] = useState(() => ({ ...(data?.colorImages || {}) }));
@@ -1204,9 +1254,10 @@ function Editor({ type, data, categories, busy, onSubmit }) {
         <Field label="PAN number" name="panNumber" defaultValue={data?.panNumber || ''} pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="e.g. ABCDE1234F" placeholder="ABCDE1234F"/>
         <Field label="GST number" name="gstNumber" defaultValue={data?.gstNumber || ''} pattern="[0-9]{2}[A-Za-z]{5}[0-9]{4}[A-Za-z][0-9A-Za-z][zZ][0-9A-Za-z]" title="15-character GST number, e.g. 08ABCDE1234F1Z5" placeholder="08ABCDE1234F1Z5"/>
       </div>
-      <p className="muted" style={{ marginBottom: 6 }}>Tick these once you have seen the documents yourself.</p>
-      <label className="checkbox"><input type="checkbox" name="gstVerified" defaultChecked={data?.gstVerified}/>GST number verified</label>
-      <label className="checkbox"><input type="checkbox" name="aadharVerified" defaultChecked={data?.aadharVerified}/>Aadhaar verified</label>
+      <p className="muted" style={{ marginBottom: 6 }}>A tick here is your own word that you have seen the document. The portal check below is separate and dated — neither one replaces the other.</p>
+      <label className="checkbox"><input type="checkbox" name="gstVerified" defaultChecked={data?.gstVerified}/>GST number verified — I have seen the document</label>
+      <label className="checkbox"><input type="checkbox" name="aadharVerified" defaultChecked={data?.aadharVerified}/>Aadhaar verified — I have seen the document</label>
+      {data && onVerify && <PortalVerify data={data} kinds={[['GST', 'GST number'], ['AADHAAR', 'Aadhaar']]} busy={busy} onVerify={onVerify}/>}
       <div className="form-grid"><Field label="Minimum order (₹)" name="min" type="number" min="0.01" step="0.01" defaultValue={data ? data.limits.minPaise / 100 : 10000} required/><Field label="Maximum order (₹)" name="max" type="number" min="0.01" step="0.01" defaultValue={data ? data.limits.maxPaise / 100 : 500000} required/></div>
       {data && <p className="muted">Updated limits apply to the next order. Existing sessions will be invalidated.</p>}
     </>}
@@ -1222,9 +1273,10 @@ function Editor({ type, data, categories, busy, onSubmit }) {
         <Field label="Aadhaar number" name="aadharNumber" defaultValue={data.aadharNumber || ''} pattern="[0-9]{12}" title="12 digits" placeholder="12-digit Aadhaar"/>
         <Field label="GST number" name="gstNumber" defaultValue={data.gstNumber || ''} pattern="[0-9]{2}[A-Za-z]{5}[0-9]{4}[A-Za-z][0-9A-Za-z][zZ][0-9A-Za-z]" title="15-character GST number, e.g. 08ABCDE1234F1Z5" placeholder="08ABCDE1234F1Z5"/>
       </div>
-      <p className="muted" style={{ marginBottom: 6 }}>Tick these once you have seen the documents yourself.</p>
-      <label className="checkbox"><input type="checkbox" name="gstVerified" defaultChecked={data.gstVerified}/>GST number verified</label>
-      <label className="checkbox"><input type="checkbox" name="aadharVerified" defaultChecked={data.aadharVerified}/>Aadhaar verified</label>
+      <p className="muted" style={{ marginBottom: 6 }}>A tick here is your own word that you have seen the document. The portal check below is separate and dated — neither one replaces the other.</p>
+      <label className="checkbox"><input type="checkbox" name="gstVerified" defaultChecked={data.gstVerified}/>GST number verified — I have seen the document</label>
+      <label className="checkbox"><input type="checkbox" name="aadharVerified" defaultChecked={data.aadharVerified}/>Aadhaar verified — I have seen the document</label>
+      {data && onVerify && <PortalVerify data={data} kinds={[['GST', 'GST number'], ['AADHAAR', 'Aadhaar']]} busy={busy} onVerify={onVerify}/>}
       <Field label="Commission (%) — what NTSA keeps from each of this seller's sales" name="commissionPercent" type="number" min="0" max="100" step="1" defaultValue={data.commissionPercent ?? 10} required/>
     </>}
     {error && <div className="alert">{error}</div>}<Button disabled={busy || uploading}>{busy ? 'Saving…' : 'Save changes'}</Button>

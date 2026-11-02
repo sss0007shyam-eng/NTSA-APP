@@ -123,6 +123,7 @@ model Seller {
   supportTickets SupportTicket[]
   devices SellerDevice[]
   loginChallenges SellerLoginChallenge[]
+  verificationChecks VerificationCheck[]
   @@map("sellers")
 }
 // A browser or phone this seller has already signed in on, proved by a long
@@ -340,6 +341,7 @@ model Vendor {
   limits VendorLimit?
   orders Order[]
   messages VendorMessage[]
+  verificationChecks VerificationCheck[]
   @@map("vendors")
 }
 // A simple two-way thread between one wholesale buyer and the admin team,
@@ -695,4 +697,57 @@ model PanelPage {
   updatedAt DateTime @updatedAt
   @@unique([panel, key])
   @@map("panel_pages")
+}
+
+// One real lookup against an outside government portal, kept whether it
+// passed or failed.
+//
+// This sits *beside* the gstVerified / aadharVerified booleans on the seller
+// and vendor rows, it does not replace them: those stay the admin's own word
+// that they looked at the paperwork, which is still the only thing available
+// for Aadhaar. A row here is the evidenced answer -- which portal was asked,
+// when, and what it said.
+//
+// The outcome is stored, not just a yes/no, because the interesting answer is
+// never binary: a GSTIN can be live but registered to a different name, which
+// is exactly the fraud signal worth catching. UNAVAILABLE rows (no provider
+// configured) are stored too -- "we tried and could not check" is a fact the
+// admin should be able to see, and it must never render as a tick.
+model VerificationCheck {
+  id String @id @default(cuid())
+  // GST | AADHAAR
+  kind String
+  // VERIFIED | MISMATCH | INACTIVE | NOT_FOUND | UNAVAILABLE | ERROR
+  // (see lib/verification.js, which owns this vocabulary)
+  outcome String
+  // Which seam answered: a provider name, or "none" when nothing was asked.
+  provider String @default("none")
+  // The number that was looked up, so an old check is not mistaken for a
+  // check of the number currently on the row. A GST number is public
+  // business information; an Aadhaar number is never written here.
+  subject String?
+  // What the portal returned, as it returned it.
+  legalName String?
+  tradeName String?
+  registrationStatus String?
+  address String?
+  // The name NTSA had on file at the time, and whether the portal's name
+  // matched it. Null means there was nothing to compare -- not the same
+  // answer as "it did not match", and only one of those is a warning.
+  nameOnFile String?
+  nameMatch Boolean?
+  // Shown to the admin verbatim: why a check could not be completed, or what
+  // the portal said no with.
+  message String?
+  // Who pressed the button. Kept as a name, not an id, so the record still
+  // reads correctly after that staff account is removed.
+  checkedByName String?
+  checkedAt DateTime @default(now())
+  sellerId String?
+  seller Seller? @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  vendorId String?
+  vendor Vendor? @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  @@index([sellerId, kind, checkedAt])
+  @@index([vendorId, kind, checkedAt])
+  @@map("verification_checks")
 }
