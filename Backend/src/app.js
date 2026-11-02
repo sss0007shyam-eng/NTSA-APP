@@ -8,6 +8,11 @@ import { db } from './db.js';
 import { router } from './routes.js';
 import { UPLOAD_DIR } from './services/storage.js';
 export const app = express();
+// Railway (like Render) puts one proxy in front of us, so req.ip must come from
+// the last X-Forwarded-For hop. Without this every visitor looks like the proxy
+// and they all share one rate-limit bucket -- one busy shopper would lock out
+// the rest.
+app.set('trust proxy', 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({ origin: config.CORS_ORIGIN.split(',') }));
 app.use(express.json({ limit: '256kb' }));
