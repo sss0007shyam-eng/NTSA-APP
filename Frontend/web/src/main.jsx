@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
-import { LayoutDashboard, Package, Shapes, Users, User, ShoppingBag, RotateCcw, LogOut, Search, Plus, ArrowUpRight, ChevronRight, Check, Menu, X, Truck, ShieldCheck, Wallet, Store, Image, Tag, Eye, EyeOff, Bell, ClipboardList, UserPlus, BadgeCheck, UserCog, MapPin, Paperclip, Settings as SettingsIcon, FileText, BarChart3, Star, TrendingUp, Stamp, LifeBuoy, MoreVertical } from 'lucide-react';
+import { LayoutDashboard, Package, Shapes, Users, User, ShoppingBag, RotateCcw, LogOut, Search, Plus, ArrowUpRight, ChevronRight, Check, Menu, X, Truck, ShieldCheck, Wallet, Store, Image, Tag, Eye, EyeOff, Bell, ClipboardList, UserPlus, BadgeCheck, UserCog, MapPin, Paperclip, Settings as SettingsIcon, FileText, BarChart3, Star, TrendingUp, Stamp, LifeBuoy, MoreVertical, Route, Smartphone, Laptop, Ban } from 'lucide-react';
 import { api, money, paise, openInvoice, suggestCategory, SELLER_PANEL_URL } from './api';
 import { Button, Field, PasswordField, Badge, Empty, Modal, Stat, ProductImage, CONDITION_LABEL } from './ui';
 import { WholesaleProductsPage, AudienceField } from './pages/wholesale-products';
@@ -13,6 +13,7 @@ import { ReviewsPage } from './pages/reviews';
 import { SellerInsightsPage } from './pages/seller-insights';
 import { ShipmentsPage } from './pages/shipments';
 import { ReportsPage } from './pages/reports';
+import { CouriersPage } from './pages/couriers';
 import { OrderTable, isNtsaOwnOrder, orderSellers } from './pages/shared';
 import './style.css';
 
@@ -33,7 +34,7 @@ const DEFAULT_INVOICE_COLUMNS = [
 // stored; the label is what both the Pages screen and the panel's nav use.
 const PANEL_CATALOG = {
   SELLER: [['products', 'My products'], ['orders', 'My orders'], ['topack', 'To pack'], ['support', 'Support'], ['settings', 'Settings']],
-  PACKING: [['packed', 'Packed']],
+  PACKING: [['packed', 'Packed'], ['cancelled', 'Cancelled']],
   SALES: [['mysellers', 'My sellers']],
   SUPPORT: [['sellerproducts', 'Seller products'], ['settings', 'Settings']],
 };
@@ -65,8 +66,11 @@ function App() {
   const [productView, setProductView] = useState('all');
   // Packing and sales staff sign in on the same page and get their own few pages.
   const [staff, setStaff] = useState([]), [applications, setApplications] = useState([]), [notifications, setNotifications] = useState([]);
-  const [toPack, setToPack] = useState([]), [packed, setPacked] = useState([]), [bellOpen, setBellOpen] = useState(false);
+  const [toPack, setToPack] = useState([]), [packed, setPacked] = useState([]), [cancelled, setCancelled] = useState([]), [bellOpen, setBellOpen] = useState(false);
   const [blockedPins, setBlockedPins] = useState([]), [pinStats, setPinStats] = useState([]), [deliveryRules, setDeliveryRules] = useState([]), [blockedAreas, setBlockedAreas] = useState([]);
+  // The delivery companies, admin-managed: one row's tracking template is what
+  // every order that courier carries is tracked with.
+  const [couriers, setCouriers] = useState([]);
   // The letterhead every invoice is printed with.
   const [settings, setSettings] = useState(null);
   const [customers, setCustomers] = useState([]);
@@ -113,8 +117,8 @@ function App() {
         }
       }
       if (account.role === 'PACKING') {
-        const [queue, done, notes] = await Promise.all([api('/packing/orders'), api('/packing/orders?status=PACKED'), api('/notifications')]);
-        setToPack(queue); setPacked(done); setNotifications(notes);
+        const [queue, done, off, notes] = await Promise.all([api('/packing/orders'), api('/packing/orders?status=PACKED'), api('/packing/orders?status=CANCELLED'), api('/notifications')]);
+        setToPack(queue); setPacked(done); setCancelled(off); setNotifications(notes);
         return;
       }
       if (account.role === 'SALES') {
@@ -135,6 +139,7 @@ function App() {
         setVendors(v); setRefunds(r); setBanners(b); setCoupons(cp); setStaff(st); setApplications(apps); setNotifications(notes); setToPack(queue); setBlockedPins(pins); setPinStats(stats); setDeliveryRules(rules); setSettings(cfg);
         setCustomers(custs); setReports(rep); setSellers(sls); setHiddenProducts(hidden); setReviews(revs); setInsights(ins); setTickets(tks);
         setPageConfig(await api('/admin/pages')); setBlockedAreas(await api('/admin/blocked-areas')); setLateOrders(await api('/admin/late-orders'));
+        setCouriers(await api('/admin/couriers'));
       }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
@@ -172,8 +177,8 @@ function App() {
   async function refresh() {
     const role = me?.role;
     if (role === 'PACKING') {
-      const [queue, done, notes] = await Promise.all([api('/packing/orders'), api('/packing/orders?status=PACKED'), api('/notifications')]);
-      setToPack(queue); setPacked(done); setNotifications(notes);
+      const [queue, done, off, notes] = await Promise.all([api('/packing/orders'), api('/packing/orders?status=PACKED'), api('/packing/orders?status=CANCELLED'), api('/notifications')]);
+      setToPack(queue); setPacked(done); setCancelled(off); setNotifications(notes);
     } else if (role === 'SALES') {
       const [apps, notes] = await Promise.all([api('/sales/applications'), api('/notifications')]);
       setApplications(apps); setNotifications(notes);
@@ -203,14 +208,16 @@ function App() {
     if (busy) return; setBusy(true); setError('');
     try { await fn(); setToast(message); await load(); } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
-  const staffNav = isPacking ? [['To pack', ClipboardList], ['Packed', Check]]
+  // The three packing screens are the same table over three queues.
+  const packingList = which => which === 'To pack' ? toPack : which === 'Packed' ? packed : cancelled;
+  const staffNav = isPacking ? [['To pack', ClipboardList], ['Packed', Check], ['Cancelled', Ban]]
     : isSales ? [['Add seller', UserPlus], ['My sellers', Store]]
     : isSupport ? [['Tickets', LifeBuoy], ['Seller products', Package], ['Settings', SettingsIcon]]
     : null;
   // Admin pages the admin shared into this staff panel, added to its nav.
   const staffAdminNav = staffNav ? grantedAdminPages.map(k => SHAREABLE_ADMIN_PAGES.find(p => p[0] === k)).filter(Boolean).map(([, label, Icon]) => [label, Icon]) : [];
   const nav = staffNav ? [...staffNav, ...staffAdminNav].filter(([label]) => { const k = NAV_KEY[label]; return !k || !hiddenPages.includes(k); })
-    : isAdmin ? [['Overview', LayoutDashboard], ['Products', Package], ['Wholesale products', Store], ['Categories', Shapes], ['Orders', ShoppingBag], ['Customers', User], ['Reviews', Star], ['Vendors', Users], ['To pack', ClipboardList], ['Shipments', Truck], ['Banners', Image], ['Coupons', Tag], ['Reports', BarChart3], ['Sellers', BadgeCheck], ['Seller insights', TrendingUp], ['Product label', Stamp], ['Support', LifeBuoy], ['Pages', FileText], ['Refunds', RotateCcw], ['Delivery areas', MapPin], ['Staff', UserCog], ['Invoice', FileText], ['Settings', SettingsIcon]]
+    : isAdmin ? [['Overview', LayoutDashboard], ['Products', Package], ['Wholesale products', Store], ['Categories', Shapes], ['Orders', ShoppingBag], ['Customers', User], ['Reviews', Star], ['Vendors', Users], ['To pack', ClipboardList], ['Shipments', Truck], ['Banners', Image], ['Coupons', Tag], ['Reports', BarChart3], ['Sellers', BadgeCheck], ['Seller insights', TrendingUp], ['Product label', Stamp], ['Support', LifeBuoy], ['Pages', FileText], ['Refunds', RotateCcw], ['Couriers', Route], ['Delivery areas', MapPin], ['Staff', UserCog], ['Invoice', FileText], ['Settings', SettingsIcon]]
     : [['Overview', LayoutDashboard], ['Wholesale catalog', Store], ['Orders', ShoppingBag], ['Messages', Paperclip]];
   // If staff land on a page the admin has since hidden, fall back to the first.
   useEffect(() => { if (staffNav && !nav.some(([name]) => name === page) && nav[0]) setPage(nav[0][0]); }, [hiddenPages]);
@@ -243,7 +250,7 @@ function App() {
       </div>}
       <span className="online-dot"/><span>{isAdmin ? 'Super Admin' : me?.name || (isPacking ? 'Packing team' : isSales ? 'Sales team' : 'Vendor')}</span><div className="avatar">{isAdmin ? 'SA' : isPacking ? 'PK' : isSales ? 'SL' : (me?.name ? me.name.trim().slice(0, 2).toUpperCase() : 'WV')}</div></div></header>
       <main className="content">
-        <div className="page-heading"><div><div className="eyebrow">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</div><h1>{page === 'Overview' ? 'A good day to grow.' : page}</h1><p>{({ Overview: 'Here’s what’s happening with your store today.', Products: 'A little care for every product on your shelf.', Categories: 'Make your collection easy to discover.', Banners: 'Control the Home screen banner without a code change.', Coupons: 'Create and manage discount codes.', Orders: 'From your shelf to their doorstep.', Vendors: 'Build stronger wholesale partnerships.', Customers: 'Everyone who has ever shopped with you.', Shipments: 'What has left the shelf, and where it is now.', Reports: 'Revenue, payments and what is actually selling.', Refunds: 'Thoughtful resolutions. Happier customers.', 'Wholesale catalog': 'Stock up on quality. Save on every order.', 'To pack': 'Everything waiting to be packed and sent.', Packed: 'Packed today and on its way.', 'Add seller': 'Sign up a shop that wants to sell on NTSA.', 'My sellers': 'What you sent for verification.', Sellers: 'Check the details, then hand out their login.', 'Product label': 'Decide whose product photos carry the NTSA logo.', Tickets: 'Help requests from sellers, and products the admin has flagged.', Support: 'Every support ticket, who handled it, and how sellers rated them.', 'Seller products': 'Take a seller’s product off the shop, or put it back.', Staff: 'Logins for your packing and sales teams.', 'Delivery areas': 'Delivery charges, and the areas you no longer deliver to.', Invoice: 'Your letterhead, the bill columns, and the terms every invoice is printed with.', Settings: 'Your account, password and how the panel looks.' })[page]}</p></div>
+        <div className="page-heading"><div><div className="eyebrow">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</div><h1>{page === 'Overview' ? 'A good day to grow.' : page}</h1><p>{({ Overview: 'Here’s what’s happening with your store today.', Products: 'A little care for every product on your shelf.', Categories: 'Make your collection easy to discover.', Banners: 'Control the Home screen banner without a code change.', Coupons: 'Create and manage discount codes.', Orders: 'From your shelf to their doorstep.', Vendors: 'Build stronger wholesale partnerships.', Customers: 'Everyone who has ever shopped with you.', Shipments: 'What has left the shelf, and where it is now.', Reports: 'Revenue, payments and what is actually selling.', Refunds: 'Thoughtful resolutions. Happier customers.', 'Wholesale catalog': 'Stock up on quality. Save on every order.', 'To pack': 'Everything waiting to be packed and sent.', Packed: 'Packed today and on its way.', Cancelled: 'Called off by the buyer. Leave these on the shelf.', 'Add seller': 'Sign up a shop that wants to sell on NTSA.', 'My sellers': 'What you sent for verification.', Sellers: 'Check the details, then hand out their login.', 'Product label': 'Decide whose product photos carry the NTSA logo.', Tickets: 'Help requests from sellers, and products the admin has flagged.', Support: 'Every support ticket, who handled it, and how sellers rated them.', 'Seller products': 'Take a seller’s product off the shop, or put it back.', Staff: 'Logins for your packing and sales teams.', 'Delivery areas': 'Delivery charges, and the areas you no longer deliver to.', Couriers: 'The delivery companies you ship with, and the link each one is tracked on.', Invoice: 'Your letterhead, the bill columns, and the terms every invoice is printed with.', Settings: 'Your account, password and how the panel looks.' })[page]}</p></div>
           {isAdmin && ['Products', 'Wholesale products', 'Categories', 'Vendors', 'Banners', 'Coupons'].includes(page) && <Button onClick={() => setModal({ type: page, data: null })}><Plus size={17}/>Add {{ Categories: 'category', Banners: 'banner', Coupons: 'coupon', 'Wholesale products': 'wholesale product' }[page] || page.slice(0, -1).toLowerCase()}</Button>}
           {isAdmin && page === 'Staff' && <Button onClick={() => setModal({ type: 'Staff', data: null })}><Plus size={17}/>Add staff login</Button>}
           {(isPacking || isAdmin) && page === 'To pack' && <Button secondary onClick={load}>Refresh</Button>}
@@ -301,9 +308,9 @@ function App() {
           {!isAdmin && page === 'Messages' && <section className="panel"><div className="panel-heading"><div><h2>Messages</h2><p>Reach the NTSA team — attach a photo or video if something arrived damaged.</p></div></div><div style={{ padding: 20 }}><VendorMessages vendor={me} self/></div></section>}
           {page === 'Vendors' && <section className="panel"><div className="panel-heading"><h2>Your wholesale partners <span className="count">{vendors.length}</span></h2></div><div className="table-scroll"><table><thead><tr><th>Partner</th><th>Contact</th><th>Order limits</th><th>Status</th><th>Actions</th></tr></thead><tbody>{vendors.map(v => <tr key={v.id}><td><strong>{v.name}</strong><small>{v.username}</small></td><td>{v.email && <small>{v.email}</small>}{v.email && v.phone && <br/>}{v.phone && <small>{v.phone}</small>}{!v.email && !v.phone && <small className="muted">Not on file</small>}</td><td>{money(v.limits.minPaise)} – {money(v.limits.maxPaise)}</td><td><Badge>{v.enabled ? 'Active' : 'Disabled'}</Badge>{v.gstVerified || v.aadharVerified ? <small style={{ color: '#418568', fontWeight: 600 }}>{[v.gstVerified && 'GST ✓', v.aadharVerified && 'Aadhaar ✓'].filter(Boolean).join(' · ')}</small> : <small className="muted">Not verified</small>}</td><td><div className="row-actions"><button onClick={() => setModal({ type: 'Vendors', data: v })}>Edit</button><button disabled={busy} onClick={() => action(() => api(`/admin/vendors/${v.id}`, { method: 'PATCH', body: { enabled: !v.enabled } }))}>{v.enabled ? 'Disable' : 'Enable'}</button><button onClick={() => setModal({ type: 'Reset', data: v })}>Reset password</button><button onClick={() => setModal({ type: 'Messages', data: v })}>Messages</button><button className="danger-text" onClick={() => setModal({ type: 'Delete', data: { path: `/admin/vendors/${v.id}`, name: v.name } })}>Remove</button></div></td></tr>)}</tbody></table></div>{!vendors.length && <Empty text="Your first partnership starts here"/>}</section>}
           {page === 'Refunds' && <section className="panel"><div className="panel-heading"><div><h2>Refund requests</h2><p>Approved refunds are credited to the customer's NTSA wallet.</p></div></div><div className="table-scroll"><table><thead><tr><th>Product / order</th><th>Reason</th><th>Amount</th><th>Status</th><th>Review</th></tr></thead><tbody>{refunds.map(r => <tr key={r.id}><td><strong>{r.orderItem.name}</strong><small>#{r.orderItem.orderId.slice(-8).toUpperCase()}</small></td><td>{r.reason}</td><td>{money(r.orderItem.unitPaise * r.orderItem.quantity)}</td><td><Badge>{r.status}</Badge></td><td>{r.status === 'REQUESTED' && <div className="row-actions"><button disabled={busy} onClick={() => action(() => api(`/admin/refunds/${r.id}`, { method: 'PATCH', body: { status: 'APPROVED' } }))}>Approve</button><button disabled={busy} className="danger-text" onClick={() => action(() => api(`/admin/refunds/${r.id}`, { method: 'PATCH', body: { status: 'REJECTED' } }))}>Reject</button></div>}</td></tr>)}</tbody></table></div>{!refunds.length && <Empty text="No refund requests"/>}</section>}
-          {['To pack', 'Packed'].includes(page) && <section className="panel"><div className="panel-heading"><h2>{page === 'To pack' ? 'Waiting to be packed' : 'Packed and on the way'} <span className="count">{(page === 'To pack' ? toPack : packed).length}</span></h2></div>
+          {['To pack', 'Packed', 'Cancelled'].includes(page) && <section className="panel"><div className="panel-heading"><h2>{page === 'To pack' ? 'Waiting to be packed' : page === 'Packed' ? 'Packed and on the way' : 'Cancelled — do not pack these'} <span className="count">{packingList(page).length}</span></h2>{page === 'Cancelled' && <p>The buyer called these off. Open one to see the bill, stamped CANCELLED.</p>}</div>
             <div className="table-scroll"><table><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Deliver to</th><th>Placed</th><th/></tr></thead><tbody>
-              {(page === 'To pack' ? toPack : packed).map(o => <tr key={o.id}>
+              {packingList(page).map(o => <tr key={o.id}>
                 <td><strong>#{o.id.slice(0, 10).toUpperCase()}</strong><small>{o.vendorId ? 'Wholesale' : 'Customer'} · {money(o.totalPaise)}</small></td>
                 <td><strong>{o.address?.name}</strong><small>{o.address?.phone}</small></td>
                 <td><strong>{o.items.reduce((s, i) => s + i.quantity, 0)} pcs</strong><small>{o.items.length} line(s)</small></td>
@@ -312,7 +319,7 @@ function App() {
                 <td><div className="row-actions"><button onClick={() => setModal({ type: 'Pack', data: o })}>Open</button></div></td>
               </tr>)}
             </tbody></table></div>
-            {!(page === 'To pack' ? toPack : packed).length && <Empty text={page === 'To pack' ? 'Nothing to pack right now' : 'Nothing packed yet'}/>}</section>}
+            {!packingList(page).length && <Empty text={page === 'To pack' ? 'Nothing to pack right now' : page === 'Packed' ? 'Nothing packed yet' : 'No cancelled orders'}/>}</section>}
           {page === 'Add seller' && <section className="panel"><div className="panel-heading"><div><h2>New seller details</h2><p>The admin checks these and creates the seller's login.</p></div></div>
             <div style={{ padding: 22 }}><SellerApplicationForm busy={busy} onSubmit={body => action(async () => { await api('/sales/applications', { method: 'POST', body }); go('My sellers'); }, 'Sent to the admin for verification')}/></div></section>}
           {page === 'Sellers' && isAdmin && <section className="panel" style={{ marginBottom: 24 }}><div className="panel-heading"><h2>Seller accounts <span className="count">{sellers.length}</span></h2></div>
@@ -331,6 +338,7 @@ function App() {
                   <button onClick={() => setModal({ type: 'Sellers', data: s })}>Edit</button>
                   <button disabled={busy} onClick={() => action(() => api(`/admin/sellers/${s.id}`, { method: 'PATCH', body: { enabled: !s.enabled } }))}>{s.enabled ? 'Freeze' : 'Unfreeze'}</button>
                   <button onClick={() => setModal({ type: 'SellerReset', data: s })}>Reset password</button>
+                  <button onClick={() => setModal({ type: 'SellerDevices', data: s })}>Devices</button>
                   <button className="danger-text" onClick={() => setModal({ type: 'Penalty', data: s })}>Apply penalty</button>
                   <button className="danger-text" onClick={() => setModal({ type: 'Delete', data: { path: `/admin/sellers/${s.id}`, name: s.shopName } })}>Remove</button>
                 </div></td>
@@ -354,6 +362,7 @@ function App() {
               </tr>)}
             </tbody></table></div>
             {!applications.length && <Empty text={isAdmin ? 'No seller sign-ups yet' : 'You have not added a seller yet'}/>}</section>}
+          {page === 'Couriers' && <CouriersPage couriers={couriers} busy={busy} action={action}/>}
           {page === 'Delivery areas' && <>
             <section className="panel"><div className="panel-heading"><div><h2>Delivery charges <span className="count">{deliveryRules.length}</span></h2><p>Set what a small order pays. An order above every slab ships free.</p></div></div>
               <div style={{ padding: '18px 22px' }}>
@@ -446,7 +455,7 @@ function App() {
       </main>
     </div>
     {toast && <div role="status" className="toast"><Check size={18}/>{toast}</div>}
-    {modal && <Modal title={({ Products: modal.data ? 'Edit product' : 'New product', 'Wholesale products': modal.data ? 'Edit wholesale product' : 'New wholesale product', Categories: modal.data ? 'Edit category' : 'New category', Vendors: modal.data ? 'Edit partner' : 'New wholesale partner', Sellers: `Edit ${modal.data?.shopName}`, Banners: modal.data ? 'Edit banner' : 'New banner', Coupons: modal.data ? 'Edit coupon' : 'New coupon', Order: 'Order details', Delete: 'Remove record', Reset: 'Reset vendor password', SellerReset: `Reset password · ${modal.data?.shopName}`, Messages: `Messages · ${modal.data?.name}`, Checkout: 'Place wholesale order', Pack: `Order #${modal.data?.id?.slice(0, 10).toUpperCase()}`, Staff: 'New staff login', StaffEdit: 'Edit staff login', StaffReset: 'Reset staff password', Application: modal.data?.shopName, Approve: `Approve ${modal.data?.shopName}`, Reject: `Reject ${modal.data?.shopName}`, Penalty: `Penalty · ${modal.data?.shopName}`, AdminReview: 'Add a review', ReportProduct: `Report to support · ${modal.data?.name}`, LateOrders: `Late orders (${lateOrders?.count ?? 0})` })[modal.type]} wide={modal.type === 'LateOrders'} close={() => !busy && setModal(null)}>
+    {modal && <Modal title={({ Products: modal.data ? 'Edit product' : 'New product', 'Wholesale products': modal.data ? 'Edit wholesale product' : 'New wholesale product', Categories: modal.data ? 'Edit category' : 'New category', Vendors: modal.data ? 'Edit partner' : 'New wholesale partner', Sellers: `Edit ${modal.data?.shopName}`, Banners: modal.data ? 'Edit banner' : 'New banner', Coupons: modal.data ? 'Edit coupon' : 'New coupon', Order: 'Order details', Delete: 'Remove record', Reset: 'Reset vendor password', SellerReset: `Reset password · ${modal.data?.shopName}`, SellerDevices: `Devices · ${modal.data?.shopName}`, Messages: `Messages · ${modal.data?.name}`, Checkout: 'Place wholesale order', Pack: `Order #${modal.data?.id?.slice(0, 10).toUpperCase()}`, Staff: 'New staff login', StaffEdit: 'Edit staff login', StaffReset: 'Reset staff password', Application: modal.data?.shopName, Approve: `Approve ${modal.data?.shopName}`, Reject: `Reject ${modal.data?.shopName}`, Penalty: `Penalty · ${modal.data?.shopName}`, AdminReview: 'Add a review', ReportProduct: `Report to support · ${modal.data?.name}`, LateOrders: `Late orders (${lateOrders?.count ?? 0})` })[modal.type]} wide={modal.type === 'LateOrders'} close={() => !busy && setModal(null)}>
       {error && <div role="alert" className="alert">{error}</div>}
       {['Products', 'Wholesale products', 'Categories', 'Vendors', 'Sellers', 'Banners', 'Coupons'].includes(modal.type) && <Editor type={modal.type} data={modal.data} categories={categories} busy={busy} onSubmit={body => action(async () => {
         const path = { Products: 'products', 'Wholesale products': 'products', Categories: 'categories', Vendors: 'vendors', Sellers: 'sellers', Banners: 'banners', Coupons: 'coupons' }[modal.type];
@@ -465,6 +474,7 @@ function App() {
       {modal.type === 'Delete' && <><p>Remove “{modal.data.name}” from the workspace? Order history is retained. Categories still linked to products cannot be removed.</p><Button disabled={busy} onClick={() => action(async () => { await api(modal.data.path, { method: 'DELETE' }); setModal(null); }, 'Record removed')}>Remove</Button></>}
       {modal.type === 'Reset' && <ResetPassword vendor={modal.data} busy={busy} onSubmit={password => action(async () => { await api(`/admin/vendors/${modal.data.id}/reset-password`, { method: 'POST', body: { password } }); setModal(null); }, 'Password updated')}/>}
       {modal.type === 'SellerReset' && <ResetPassword vendor={{ ...modal.data, name: modal.data.shopName }} busy={busy} onSubmit={password => action(async () => { await api(`/admin/sellers/${modal.data.id}/password`, { method: 'POST', body: { password } }); setModal(null); }, 'Password updated')}/>}
+      {modal.type === 'SellerDevices' && <SellerDeviceManager seller={modal.data} busy={busy} onClear={done => action(async () => { await api(`/admin/sellers/${modal.data.id}/devices`, { method: 'DELETE' }); done(); }, 'Devices cleared — their next sign-in will register the device it comes from')}/>}
       {modal.type === 'Penalty' && <PenaltyManager seller={modal.data} busy={busy} onApply={(amount, reason, done) => action(async () => { await api(`/admin/sellers/${modal.data.id}/penalty`, { method: 'POST', body: { amountPaise: paise(amount), reason } }); done(); }, 'Penalty applied')} onRemove={(id, done) => action(async () => { await api(`/admin/sellers/${modal.data.id}/penalties/${id}`, { method: 'DELETE' }); done(); }, 'Penalty removed')}/>}
       {modal.type === 'AdminReview' && <AdminReviewForm products={products} busy={busy} onSubmit={({ productId, body }) => action(async () => { await api(`/admin/products/${productId}/reviews`, { method: 'POST', body }); setModal(null); }, 'Review added')}/>}
       {modal.type === 'LateOrders' && lateOrders && <LateOrdersPanel late={lateOrders} busy={busy} onSavePhone={phone => action(() => api('/admin/settings', { method: 'PUT', body: settingsBody({ deliveryTeamPhone: phone || null }) }), 'Delivery team number saved')} onOpenOrder={id => { const o = orders.find(x => x.id === id); if (o) setModal({ type: 'Order', data: o }); }}/>}
@@ -481,6 +491,32 @@ function App() {
 }
 // What the packing team works from: who it goes to, and exactly what to put
 // in the box. Cancelled orders say so in red so nothing gets packed by mistake.
+// Where a seller is signed in, and the way out when they're locked out of
+// their own panel -- a new laptop or phone needs a code texted to their
+// registered number, and NTSA has no SMS gateway wired up yet, so clearing
+// the list is what gets them back in: with no devices on file their next
+// sign-in registers itself instead of asking for a code. Which also means
+// anyone holding their password could walk in the same way, so check who is
+// asking (ring the number on the account) before clearing.
+function SellerDeviceManager({ seller, busy, onClear }) {
+  const [list, setList] = useState(null);
+  const load = () => api(`/admin/sellers/${seller.id}/devices`).then(setList).catch(() => setList([]));
+  useEffect(() => { load(); }, []);
+  return <>
+    <p className="muted">The laptops and phones {seller.shopName} is signed in on. A sign-in from anywhere else needs a code sent to {seller.phone}.</p>
+    {list === null ? <p className="muted" style={{ marginTop: 18 }}>Loading…</p> : list.length ? <div className="table-scroll" style={{ marginTop: 18 }}>
+      <table><thead><tr><th>Device</th><th>Last IP</th><th>First used</th><th>Last used</th></tr></thead>
+        <tbody>{list.map(d => <tr key={d.id}>
+          <td><strong style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{/Android|iPhone/.test(d.label) ? <Smartphone size={15}/> : <Laptop size={15}/>}{d.label}</strong></td>
+          <td><small>{d.lastIp || '—'}</small></td>
+          <td><small>{new Date(d.createdAt).toLocaleString('en-IN')}</small></td>
+          <td><small>{new Date(d.lastUsedAt).toLocaleString('en-IN')}</small></td>
+        </tr>)}</tbody>
+      </table>
+    </div> : <Empty text="No devices on record — their next sign-in will register itself"/>}
+    {!!list?.length && <Button secondary disabled={busy} style={{ marginTop: 20 }} onClick={() => onClear(load)}>Clear all devices &amp; sign them out</Button>}
+  </>;
+}
 // Applying penalties to a seller and seeing the ones already on them, so a
 // mistaken fine can be taken back. The list reloads itself after each change.
 function PenaltyManager({ seller, busy, onApply, onRemove }) {
