@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Contact — NTSA</title>
-  <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="assets/favicon.png" type="image/png" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header>
@@ -22,25 +22,57 @@
 
   <main>
     <h1>Contact us</h1>
-    <p>For orders, returns, or any question about the app, reach us here.</p>
+    <p>Have a question about an order, a return, or the app? Send us a message and our team will get back to you.</p>
 
-    <div class="cards">
-      <div class="card">
-        <h3>Email</h3>
-        <p><span class="placeholder">[EMAIL]</span></p>
-      </div>
-      <div class="card">
-        <h3>Phone</h3>
-        <p><span class="placeholder">[PHONE]</span><br />Mon to Sat, 10 AM to 6 PM</p>
-      </div>
-      <div class="card">
-        <h3>Business</h3>
-        <p>SSS Enterprises</p>
-      </div>
-      <div class="card">
-        <h3>Grievance Officer</h3>
-        <p><span class="placeholder">[NAME]</span><br /><span class="placeholder">[EMAIL]</span></p>
-      </div>
+    <div class="contact-grid">
+      <form id="contact-form" class="form" novalidate>
+        <div class="field">
+          <label for="name">Your name</label>
+          <input id="name" name="name" type="text" autocomplete="name" required maxlength="80" />
+        </div>
+        <div class="field">
+          <label for="phone">Mobile number</label>
+          <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="10-digit number" required maxlength="15" />
+        </div>
+        <div class="field">
+          <label for="email">Email <span class="opt">(optional)</span></label>
+          <input id="email" name="email" type="email" autocomplete="email" maxlength="120" />
+        </div>
+        <div class="field">
+          <label for="topic">What is this about?</label>
+          <select id="topic" name="topic">
+            <option>Order not received</option>
+            <option>Damaged or wrong item</option>
+            <option>Return or refund</option>
+            <option>Login or account</option>
+            <option>Selling on NTSA</option>
+            <option>Something else</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="order">Order number <span class="opt">(optional)</span></label>
+          <input id="order" name="order" type="text" maxlength="40" />
+        </div>
+        <div class="field">
+          <label for="message">Your message</label>
+          <textarea id="message" name="message" rows="5" required maxlength="2000"></textarea>
+        </div>
+        <!-- spam trap: real people never see or fill this -->
+        <div class="hp" aria-hidden="true"><label>Leave this empty <input name="website" tabindex="-1" autocomplete="off" /></label></div>
+        <button class="btn send" type="submit">Send message</button>
+        <p id="form-status" class="form-status" role="status" aria-live="polite"></p>
+      </form>
+
+      <aside class="cards side">
+        <div class="card">
+          <h3>Already ordered?</h3>
+          <p>Open the order in the app and tap "Problem with this order?" for the fastest help. Replies appear in the app.</p>
+        </div>
+        <div class="card">
+          <h3>Business</h3>
+          <p>SSS Enterprises</p>
+        </div>
+      </aside>
     </div>
   </main>
 
@@ -55,5 +87,51 @@
       </nav>
     </div>
   </footer>
+
+  <script>
+    // Where the form is sent. Paste the form's URL here (for example a Formspree
+    // form: https://formspree.io/f/xxxxxxxx). Until it is set the form says it
+    // cannot send, rather than pretending the message went through.
+    var FORM_ENDPOINT = '';
+
+    (function () {
+      var form = document.getElementById('contact-form');
+      var status = document.getElementById('form-status');
+      var btn = form.querySelector('button');
+
+      function say(text, ok) {
+        status.textContent = text;
+        status.className = 'form-status ' + (ok ? 'ok' : 'err');
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var data = Object.fromEntries(new FormData(form).entries());
+        if (data.website) return; // spam trap filled in
+        var phone = (data.phone || '').replace(/[\s-]/g, '');
+        if (!data.name.trim()) return say('Please enter your name.', false);
+        if (!/^(\+91)?[6-9][0-9]{9}$/.test(phone)) return say('Please enter a valid 10-digit mobile number.', false);
+        if (data.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(data.email)) return say('That email does not look right.', false);
+        if (data.message.trim().length < 10) return say('Please write a little more so we can help.', false);
+        if (!FORM_ENDPOINT) return say('Sorry, the form cannot send right now. Please contact us from the NTSA app.', false);
+
+        btn.disabled = true;
+        say('Sending...', true);
+        delete data.website;
+        data.phone = phone;
+        fetch(FORM_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(data)
+        }).then(function (r) {
+          if (!r.ok) throw new Error('bad status');
+          form.reset();
+          say('Thank you. We got your message and will get back to you soon.', true);
+        }).catch(function () {
+          say('Could not send your message. Please try again in a moment.', false);
+        }).then(function () { btn.disabled = false; });
+      });
+    })();
+  </script>
 </body>
 </html>
