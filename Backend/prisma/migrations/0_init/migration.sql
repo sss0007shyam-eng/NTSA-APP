@@ -515,6 +515,28 @@ CREATE TABLE "panel_pages" (
     CONSTRAINT "panel_pages_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "verification_checks" (
+    "id" TEXT NOT NULL,
+    "kind" TEXT NOT NULL,
+    "outcome" TEXT NOT NULL,
+    "provider" TEXT NOT NULL DEFAULT 'none',
+    "subject" TEXT,
+    "legalName" TEXT,
+    "tradeName" TEXT,
+    "registrationStatus" TEXT,
+    "address" TEXT,
+    "nameOnFile" TEXT,
+    "nameMatch" BOOLEAN,
+    "message" TEXT,
+    "checkedByName" TEXT,
+    "checkedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "sellerId" TEXT,
+    "vendorId" TEXT,
+
+    CONSTRAINT "verification_checks_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "users_firebaseUid_key" ON "users"("firebaseUid");
 
@@ -623,6 +645,12 @@ CREATE UNIQUE INDEX "wallet_transactions_reference_key" ON "wallet_transactions"
 -- CreateIndex
 CREATE UNIQUE INDEX "panel_pages_panel_key_key" ON "panel_pages"("panel", "key");
 
+-- CreateIndex
+CREATE INDEX "verification_checks_sellerId_kind_checkedAt_idx" ON "verification_checks"("sellerId", "kind", "checkedAt");
+
+-- CreateIndex
+CREATE INDEX "verification_checks_vendorId_kind_checkedAt_idx" ON "verification_checks"("vendorId", "kind", "checkedAt");
+
 -- AddForeignKey
 ALTER TABLE "seller_applications" ADD CONSTRAINT "seller_applications_submittedById_fkey" FOREIGN KEY ("submittedById") REFERENCES "admins"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
@@ -709,4 +737,10 @@ ALTER TABLE "cart_items" ADD CONSTRAINT "cart_items_userId_fkey" FOREIGN KEY ("u
 
 -- AddForeignKey
 ALTER TABLE "cart_items" ADD CONSTRAINT "cart_items_productId_fkey" FOREIGN KEY ("productId") REFERENCES "products"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "verification_checks" ADD CONSTRAINT "verification_checks_sellerId_fkey" FOREIGN KEY ("sellerId") REFERENCES "sellers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "verification_checks" ADD CONSTRAINT "verification_checks_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "vendors"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
