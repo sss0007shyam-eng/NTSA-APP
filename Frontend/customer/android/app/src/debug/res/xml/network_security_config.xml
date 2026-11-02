@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only (this replaces src/main's copy when building a debug APK).
+  A test phone reaches the dev machine's backend at http://<laptop-LAN-IP>:4000,
+  and that IP changes from network to network, so plain HTTP is allowed here
+  rather than naming each address. A release APK never gets this file and
+  still requires HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true"/>
+</network-security-config>
