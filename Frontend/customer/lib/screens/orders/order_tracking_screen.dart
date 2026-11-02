@@ -40,6 +40,10 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   Order? _order;
   String? _error;
   bool _otpBusy = false;
+  // Courier model by default: the courier runs its own OTP, so NTSA shows none.
+  // Flipped on by the admin only for own-team delivery. Read once from the app
+  // config so the "Get OTP" button appears only when NTSA actually issues one.
+  bool _ownDeliveryOtp = false;
   bool _cancelling = false;
   bool _invoiceBusy = false;
   bool _reordering = false;
@@ -68,7 +72,20 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     if (_error != null) setState(() => _error = null);
     try {
       final data = await ApiClient.instance.get('/orders/${widget.orderId}');
-      if (mounted) setState(() => _order = Order.fromJson(data as Map<String, dynamic>));
+      // Whether NTSA issues its own delivery OTP is an admin setting; default off
+      // (courier model). A failed config read leaves it off, so the OTP button
+      // simply stays hidden rather than the screen breaking.
+      bool ownOtp = false;
+      try {
+        final cfg = await ApiClient.instance.get('/app-config') as Map<String, dynamic>;
+        ownOtp = cfg['ownDeliveryOtp'] == true;
+      } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _order = Order.fromJson(data as Map<String, dynamic>);
+          _ownDeliveryOtp = ownOtp;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
@@ -277,7 +294,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                       ),
                     ),
                   ),
-                  if (order.status == 'OUT_FOR_DELIVERY')
+                  if (order.status == 'OUT_FOR_DELIVERY' && _ownDeliveryOtp)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
                       child: PrimaryButton(label: context.tr('orders.track.get_otp'), orange: true, loading: _otpBusy, onPressed: _getDeliveryOtp),

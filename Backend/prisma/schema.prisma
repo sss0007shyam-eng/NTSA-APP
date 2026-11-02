@@ -275,6 +275,11 @@ model Settings {
   invoiceColumns Json?
   // Whether NTSA's own (non-seller) product photos get the logo stamp.
   watermarkOwn Boolean @default(true)
+  // Who confirms delivery. false (the default) is the courier model: the
+  // courier runs its own OTP and NTSA just hears a "Delivered" webhook, so the
+  // app never shows an OTP. true is own-team delivery: NTSA generates the OTP
+  // the customer reads out to the rider. Flipped by the admin on Settings.
+  ownDeliveryOtp Boolean @default(false)
   // Who the admin calls or messages when an order runs late (the delivery
   // team's number). Set from the late-orders list itself.
   deliveryTeamPhone String?

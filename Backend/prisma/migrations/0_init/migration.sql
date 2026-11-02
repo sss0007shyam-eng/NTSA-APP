@@ -185,6 +185,7 @@ CREATE TABLE "settings" (
     "invoiceBankDetails" TEXT,
     "invoiceColumns" JSONB,
     "watermarkOwn" BOOLEAN NOT NULL DEFAULT true,
+    "ownDeliveryOtp" BOOLEAN NOT NULL DEFAULT false,
     "deliveryTeamPhone" TEXT,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

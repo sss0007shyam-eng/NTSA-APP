@@ -233,7 +233,7 @@ function App() {
   const cartTotal = cartItems.reduce((sum, p) => sum + p.wholesalePaise * p.quantity, 0);
   const next = { PLACED: 'PACKED', PACKED: 'SHIPPED', SHIPPED: 'OUT_FOR_DELIVERY' };
   // The settings row is saved whole (PUT), so a one-field change re-sends the rest.
-  const settingsBody = patch => ({ companyName: settings?.companyName || 'NTSA', companyAddress: settings?.companyAddress || '', companyGSTIN: settings?.companyGSTIN || null, companyPhone: settings?.companyPhone || null, companyEmail: settings?.companyEmail || null, logoUrl: settings?.logoUrl || null, invoiceTerms: settings?.invoiceTerms || null, invoiceBankDetails: settings?.invoiceBankDetails || null, invoiceColumns: settings?.invoiceColumns || null, watermarkOwn: settings?.watermarkOwn !== false, deliveryTeamPhone: settings?.deliveryTeamPhone || null, ...patch });
+  const settingsBody = patch => ({ companyName: settings?.companyName || 'NTSA', companyAddress: settings?.companyAddress || '', companyGSTIN: settings?.companyGSTIN || null, companyPhone: settings?.companyPhone || null, companyEmail: settings?.companyEmail || null, logoUrl: settings?.logoUrl || null, invoiceTerms: settings?.invoiceTerms || null, invoiceBankDetails: settings?.invoiceBankDetails || null, invoiceColumns: settings?.invoiceColumns || null, watermarkOwn: settings?.watermarkOwn !== false, ownDeliveryOtp: settings?.ownDeliveryOtp === true, deliveryTeamPhone: settings?.deliveryTeamPhone || null, ...patch });
   function go(name) { setPage(name); try { sessionStorage.setItem('ntsa-page', name); } catch {} setQuery(''); setMobileNav(false); }
   return <div className="app-shell">
     <aside className={mobileNav ? 'sidebar open' : 'sidebar'}><div className="brand"><img className="brand-logo" src="/ntsa_logo.png" alt="NTSA"/></div><div className="workspace-label">{isPacking ? 'PACKING WORKSPACE' : isSales ? 'SALES WORKSPACE' : isSupport ? 'SUPPORT WORKSPACE' : isAdmin ? 'COMMERCE WORKSPACE' : 'WHOLESALE WORKSPACE'}</div>
@@ -364,6 +364,12 @@ function App() {
             {!applications.length && <Empty text={isAdmin ? 'No seller sign-ups yet' : 'You have not added a seller yet'}/>}</section>}
           {page === 'Couriers' && <CouriersPage couriers={couriers} busy={busy} action={action}/>}
           {page === 'Delivery areas' && <>
+            <section className="panel"><div className="panel-heading"><div><h2>Delivery confirmation</h2><p>Courier delivery (default): the courier sends its own OTP and the app shows none. Turn this on only if your own team delivers and you want NTSA's OTP shown in the app.</p></div></div>
+              <div style={{ padding: '18px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                <div><strong>NTSA sends its own delivery OTP</strong><br/><small className="muted">{settings?.ownDeliveryOtp ? 'On — the customer shows an OTP to your delivery person.' : 'Off — the courier company confirms delivery (recommended).'}</small></div>
+                <button type="button" role="switch" aria-checked={settings?.ownDeliveryOtp === true} className={`wm-toggle ${settings?.ownDeliveryOtp === true ? 'on' : ''}`} disabled={busy} onClick={() => { const v = !(settings?.ownDeliveryOtp === true); action(() => api('/admin/settings', { method: 'PUT', body: settingsBody({ ownDeliveryOtp: v }) }), `Delivery OTP ${v ? 'on (own team)' : 'off (courier)'}`); }}><span/></button>
+              </div>
+            </section>
             <section className="panel"><div className="panel-heading"><div><h2>Delivery charges <span className="count">{deliveryRules.length}</span></h2><p>Set what a small order pays. An order above every slab ships free.</p></div></div>
               <div style={{ padding: '18px 22px' }}>
                 <form className="editor" style={{ marginBottom: 0 }} onSubmit={e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); e.target.reset(); action(() => api('/admin/delivery-rules', { method: 'POST', body: { belowPaise: paise(f.below), chargePaise: paise(f.charge) } }), 'Delivery charge added'); }}>

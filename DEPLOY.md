@@ -176,6 +176,15 @@ It is idempotent — it upserts, prints `Seed complete. Existing accounts and
 products were preserved.`, and is safe to run again. It does *not* create the
 demo wholesaler account, because that part only runs when `DEMO_MODE=true`.
 
+> **Staff logins are not seeded.** A fresh database has only the one admin
+> account (from `SEED_ADMIN_EMAIL`). The **packing, sales and support** team
+> logins do not exist until the admin creates them in the panel: sign in as the
+> admin → **Staff** → add each person with a role. The dev credentials like
+> `packing@ntsa.local` only work on the old dev database where they were made by
+> hand; they will **not** work on the live site until the admin creates them.
+> Support tickets are visible to the admin too, so support can be handled before
+> a dedicated support login exists.
+
 Sign in to the admin panel afterwards with `SEED_ADMIN_EMAIL` /
 `SEED_ADMIN_PASSWORD` and change the password.
 

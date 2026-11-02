@@ -264,6 +264,9 @@ router.post('/webhooks/courier', async (req, res) => {
   });
   res.json({ ok: true, matched: true, courier: partner?.name ?? null, duplicate: result.duplicate });
 });
+// Public feature flags the app reads at startup, so it can show or hide things
+// an admin controls -- today, whether NTSA runs its own delivery OTP.
+router.get('/app-config', async (_req, res) => res.json({ ownDeliveryOtp: (await getSettings())?.ownDeliveryOtp === true }));
 router.use(auth);
 router.get('/me', async (req, res) => {
   const { passwordHash, sessionVersion, ...account } = req.actor.account;
@@ -367,7 +370,12 @@ router.get('/orders/:id/invoice', async (req, res) => {
   res.setHeader('Content-Disposition', `inline; filename="${invoiceNumberFor(order)}.pdf"`);
   await streamInvoice(order, await getSettings(), res);
 });
-router.post('/orders/:id/delivery-code', buyer, async (req, res) => res.json(await deliveryCode(req.actor, req.params.id)));
+router.post('/orders/:id/delivery-code', buyer, async (req, res) => {
+  // In the courier model (the default) the courier runs its own OTP, so NTSA
+  // never issues one -- refuse rather than hand out a code no rider will ask for.
+  requireThat((await getSettings())?.ownDeliveryOtp === true, 400, 'This order is delivered by a courier, which sends its own OTP. No NTSA OTP is needed.');
+  res.json(await deliveryCode(req.actor, req.params.id));
+});
 // A shopper or wholesale buyer calling off their own order before it's packed.
 router.post('/orders/:id/cancel', buyer, async (req, res) => {
   const { reason } = z.object({ reason: z.string().trim().max(300).optional() }).parse(req.body ?? {});
