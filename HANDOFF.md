@@ -31,9 +31,44 @@ On Render, these are set separately per-service in each service's Environment ta
 
 ## Courier tracking: what to set up with the delivery company
 
-NTSA does not deliver with its own riders — an outside courier does. The Backend
-expects one webhook from that courier (or from an aggregator like Shiprocket),
-and will otherwise be driven by hand from the admin panel.
+NTSA does not deliver with its own riders — an outside courier does. **Which
+courier, and the link each one is tracked on, is admin-managed** (panel →
+**Couriers**): there is no code change in switching delivery company, and no
+courier name typed per order.
+
+### The Couriers screen (admin only)
+
+Each row is a `CourierPartner`: a display name, a **tracking URL template** with
+`{awb}` where the tracking number goes (e.g.
+`https://www.delhivery.com/track/package/{awb}`), optional contact phone/email
+for that courier's own support desk, `active`, and a flag for the one the panel
+offers first. HTTPS only, and the `{awb}` placeholder is required
+(`lib/validation.js`) — without it a template would quietly link every order to
+the courier's homepage.
+
+The template is what makes the one-place change work: an order's Track link is
+**built from the template every time the order is read** (`lib/courier.js`
+`trackingLinkFor()`), never frozen onto the order. Fix a courier's link, or move
+to a different courier's portal, and every order that courier is carrying follows
+— customer app, seller panel, support, admin.
+
+- `/admin/couriers` (GET/POST/PUT/DELETE) is admin-only; support reads the list
+  through `GET /support/couriers` to fill its dropdown but cannot change it.
+- Booking a shipment (`PUT /support/orders/:id/tracking`) normally sends
+  `courierId`. The partner's name is copied onto the order as `courierName` — the
+  name it was booked under — so order history still reads correctly after the
+  partner is renamed or removed.
+- **Per-order `trackingUrl` is still accepted, as an override only.** It's the
+  escape hatch for a one-off link the template can't build; left empty (the normal
+  case) the partner's template is used. `courierName` on its own is also still
+  accepted, for a courier nobody has set up yet.
+- Removing a courier clears the link on its past orders (`onDelete: SetNull`) and
+  leaves the name — order history never goes blank.
+- `prisma/seed.js` seeds Delhivery, Shiprocket, Ecom Express and XpressBees as a
+  starting point, only when the table is empty. Verify each link against the
+  courier's current tracking page before relying on it.
+
+### The webhook
 
 1. Set `COURIER_WEBHOOK_SECRET` in the Backend's environment (any random string of
    16+ characters). Leave it unset and the webhook route returns 404, which is the
@@ -48,9 +83,14 @@ and will otherwise be driven by hand from the admin panel.
    wording ("OFD", "Undelivered", "RTO Initiated"...) onto our own statuses. A
    status it does not recognise is still recorded, just as a plain update — check
    `PATTERNS` there when onboarding a new courier.
-4. Unknown AWBs get a 202 (so the courier stops retrying), and the same event sent
+4. `courier` is matched against the configured partners rather than trusted as-is,
+   with spacing and punctuation ignored (`matchCourier()` in `lib/courier.js`), so
+   "ecom-express" and a partner the admin has since **renamed** both still resolve.
+   When it resolves and the order had no partner linked (booked by typing a name),
+   the order is linked then and there, so its Track link starts working.
+5. Unknown AWBs get a 202 (so the courier stops retrying), and the same event sent
    twice is stored once. A late, out-of-order webhook can never un-deliver an order.
-5. The admin/support panel can do all of this by hand (courier + AWB, and "Add
+6. The admin/support panel can do all of this by hand (courier + AWB, and "Add
    update") for a courier with no webhook at all.
 
 Delivery OTP: right now the Backend still generates its own OTP, which the

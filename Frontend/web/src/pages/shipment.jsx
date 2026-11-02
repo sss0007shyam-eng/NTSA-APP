@@ -34,9 +34,32 @@ export function Journey({ events }) {
   </li>)}</ol>;
 }
 
+// Value of the courier dropdown that means "not one of ours" -- it swaps the
+// dropdown for a plain name box, so a courier the admin hasn't set up yet can
+// still be booked without blocking the shipment.
+const OTHER = 'OTHER';
+
+/** The couriers the admin has set up, loaded once per mount. */
+function useCouriers() {
+  const [couriers, setCouriers] = useState([]);
+  useEffect(() => {
+    let live = true;
+    // The dropdown is a convenience: if the list can't be loaded, the form
+    // falls back to typing a name rather than refusing to book the shipment.
+    api('/support/couriers').then(r => live && setCouriers(r)).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  return couriers;
+}
+
 /** Order modal: courier form, journey, and the add-an-update form. */
 export function ShipmentSection({ order, canEdit, canDeliver, busy, action }) {
   const [editing, setEditing] = useState(false);
+  const couriers = useCouriers();
+  // Which configured courier is picked. Starts on the one already booked, then
+  // the admin's "offer first" choice, and only falls back to a typed name.
+  const [picked, setPicked] = useState(null);
+  const chosen = picked ?? order.courier?.id ?? couriers.find(c => c.isDefault)?.id ?? (couriers.length ? couriers[0].id : OTHER);
   const has = order.courierName || order.trackingNumber;
   if (!canEdit && !has && !order.events?.length) return null;
   const send = (path, method, body, done, msg) => action(async () => { await api(`/support/orders/${order.id}/${path}`, { method, body }); done(); }, msg);
@@ -44,9 +67,19 @@ export function ShipmentSection({ order, canEdit, canDeliver, busy, action }) {
   return <section className="shipment" aria-label="Shipment">
     <h3><Truck size={15} style={{ verticalAlign: -2 }}/> Shipment</h3>
     {has && !editing ? <div style={{ marginBottom: 8 }}><TrackingLine order={order}/>{canEdit && <button type="button" className="text-button" onClick={() => setEditing(true)}>Edit courier details</button>}</div>
-      : canEdit ? <form className="editor" style={{ marginTop: 0 }} onSubmit={e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); send('tracking', 'PUT', { courierName: f.courier.trim(), trackingNumber: f.awb.trim(), trackingUrl: f.url.trim() || undefined }, () => setEditing(false), 'Courier details saved'); }}>
-        <div className="form-grid"><Field label="Courier" name="courier" defaultValue={order.courierName || ''} required maxLength={80} placeholder="e.g. Delhivery"/><Field label="Tracking number (AWB)" name="awb" defaultValue={order.trackingNumber || ''} required maxLength={60}/></div>
-        <Field label="Tracking link (optional)" name="url" type="url" defaultValue={order.trackingUrl || ''} maxLength={300} placeholder="https://..."/>
+      : canEdit ? <form className="editor" style={{ marginTop: 0 }} onSubmit={e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); send('tracking', 'PUT', { courierId: chosen === OTHER ? undefined : chosen, courierName: chosen === OTHER ? f.courier.trim() : undefined, trackingNumber: f.awb.trim(), trackingUrl: f.url.trim() || undefined }, () => setEditing(false), 'Courier details saved'); }}>
+        <div className="form-grid">
+          {/* Picking a configured courier is the normal path: the Track link is
+              then built from that courier's template, so the admin can change
+              the link for every order from the Couriers screen. */}
+          <Field label="Courier"><select name="courierId" value={chosen} onChange={e => setPicked(e.target.value)}>
+            {couriers.map(c => <option key={c.id} value={c.id}>{c.name}{c.isDefault ? ' (usual)' : ''}</option>)}
+            <option value={OTHER}>Another courier — type the name</option>
+          </select></Field>
+          <Field label="Tracking number (AWB)" name="awb" defaultValue={order.trackingNumber || ''} required maxLength={60}/>
+        </div>
+        {chosen === OTHER && <Field label="Courier name" name="courier" defaultValue={order.courierName || ''} required maxLength={80} placeholder="e.g. a local delivery company"/>}
+        <Field label="Tracking link (only to override the courier's own link)" name="url" type="url" defaultValue={order.trackingUrl || ''} maxLength={300} placeholder="https://..."/>
         <Button disabled={busy}>Save courier details</Button>{editing && <button type="button" className="text-button" style={{ display: 'inline-flex', marginLeft: 12 }} onClick={() => setEditing(false)}>Cancel</button>}
       </form> : null}
     <Journey events={order.events}/>

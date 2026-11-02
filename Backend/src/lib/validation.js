@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAX_MONEY } from './rules.js';
+import { AWB_PLACEHOLDER } from './courier.js';
 import { config } from '../config.js';
 export { z };
 const text = z.string().trim().min(1).max(200);
@@ -123,6 +124,24 @@ export const blockedAreaSchema = z.object({
   name: z.string().trim().min(1).max(80),
   reason: z.string().trim().max(200).nullable().optional(),
 });
+// A delivery company the admin has set up. The tracking link is a template,
+// not a finished URL: `{awb}` is required, because that placeholder is the
+// whole point -- it's what makes editing this one line re-point every order
+// that courier is carrying. HTTPS only, the same rule the per-order tracking
+// link already follows.
+export const courierPartnerSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  trackingUrlTemplate: z.string().trim().url().max(500)
+    .refine(v => v.startsWith('https://'), 'Tracking link must use HTTPS')
+    .refine(v => v.includes(AWB_PLACEHOLDER), `The tracking link must contain ${AWB_PLACEHOLDER} where the tracking number goes`),
+  contactPhone: z.string().trim().regex(/^\+?[0-9]{10,15}$/, 'Enter a valid phone number').nullable().optional(),
+  contactEmail: z.string().trim().toLowerCase().email().max(200).nullable().optional(),
+  active: z.boolean().default(true),
+  isDefault: z.boolean().default(false),
+});
+// An edit sends only what changed, so "make this the default" or "switch this
+// one off" doesn't have to re-send the whole row.
+export const courierPartnerUpdateSchema = courierPartnerSchema.partial();
 export const staffRole = z.enum(['ADMIN', 'PACKING', 'SALES', 'SUPPORT']);
 export const staffCreateSchema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -146,6 +165,16 @@ export const sellerApplicationSchema = z.object({
   gstNumber: z.string().trim().toUpperCase().regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/, 'Enter a valid 15-character GST number').nullable().optional(),
   aadharNumber: z.string().regex(/^[0-9]{12}$/, 'Aadhaar number must be exactly 12 digits').nullable().optional(),
   documents: z.array(imageUrlSchema).max(6).default([]),
+});
+// A seller's panel remembers every browser and phone it has been signed in
+// on. The token is whatever the client kept from its last sign-in -- a value
+// that is stale, forged or missing simply means "a device we don't know", so
+// it is accepted loosely here and resolved by looking it up.
+export const sellerDeviceLoginSchema = z.object({ deviceToken: z.string().trim().max(200).optional() });
+// Second step of a new-device seller sign-in: the code from the SMS.
+export const sellerOtpSchema = z.object({
+  challengeId: z.string().trim().min(1).max(60),
+  otp: z.string().trim().regex(/^[0-9]{6}$/, 'Enter the 6-digit code'),
 });
 export const sellerApproveSchema = z.object({
   username: z.string().trim().min(3).max(50).regex(/^[a-zA-Z0-9_.-]+$/, 'Only letters, numbers, dots, hyphens and underscores'),

@@ -121,7 +121,53 @@ model Seller {
   items OrderItem[]
   penalties SellerPenalty[]
   supportTickets SupportTicket[]
+  devices SellerDevice[]
+  loginChallenges SellerLoginChallenge[]
   @@map("sellers")
+}
+// A browser or phone this seller has already signed in on, proved by a long
+// random token the client keeps. Only its hash is stored, so a leaked row
+// can't be replayed as a known device. A login presenting no token, or one
+// that isn't here, is a new device and has to clear an OTP first.
+//
+// The user-agent and IP are recorded only so the seller recognises the row in
+// their Devices list -- never to decide whether a device is known. A mobile
+// IP changes on almost every login, so deciding on IP would send an OTP every
+// single time and make the panel unusable.
+model SellerDevice {
+  id String @id @default(cuid())
+  sellerId String
+  tokenHash String @unique
+  // What the seller sees in their Devices list, e.g. "Chrome on Windows".
+  label String
+  lastIp String?
+  lastUserAgent String?
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+  seller Seller @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  @@index([sellerId, lastUsedAt])
+  @@map("seller_devices")
+}
+// A password accepted on an unknown device, waiting for the OTP sent to the
+// seller's registered phone. Hash + expiry + attempt counter, the same shape
+// as `Order.deliveryOtp*`; its own table rather than fields on `Seller` so
+// two devices can be mid-challenge at once without overwriting each other.
+model SellerLoginChallenge {
+  id String @id @default(cuid())
+  sellerId String
+  otpHash String
+  expiresAt DateTime
+  attempts Int @default(0)
+  // Stamped when the OTP is accepted, so one challenge buys one session.
+  usedAt DateTime?
+  // Carried onto the SellerDevice row the accepted OTP creates.
+  label String
+  ip String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  seller Seller @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  @@index([sellerId, createdAt])
+  @@map("seller_login_challenges")
 }
 // A help request. A seller raises one about a problem, or the admin raises
 // one to flag a product to the support team. The support team replies in the
@@ -180,6 +226,35 @@ model DeliveryRule {
   chargePaise Int
   createdAt DateTime @default(now())
   @@map("delivery_rules")
+}
+// The delivery companies the admin has set up. Before this, each order's
+// courier was free text and its tracking link was typed in per order, so
+// switching delivery company meant re-typing both on every new order. An
+// order now points at one of these rows instead, and the Track link is worked
+// out from `trackingUrlTemplate` every time it is read -- which is what lets
+// the admin re-point every order's tracking link by editing one row.
+model CourierPartner {
+  id String @id @default(cuid())
+  // What staff and the customer see, e.g. "Delhivery". Unique so the courier
+  // webhook can resolve an incoming courier name to a row.
+  name String @unique
+  // The courier's tracking page with `{awb}` where the tracking number goes,
+  // e.g. "https://www.delhivery.com/track/package/{awb}". HTTPS only, and the
+  // placeholder is required (validation.js) -- a template without it would
+  // quietly link every order to the courier's homepage.
+  trackingUrlTemplate String
+  // Who support calls or writes to at the courier when a parcel is stuck.
+  contactPhone String?
+  contactEmail String?
+  active Boolean @default(true)
+  // The one offered first when staff book a shipment. A flag on the row rather
+  // than a column on Settings, so "make this the default" is one write on the
+  // courier being edited; at most one row holds it (enforced in routes.js).
+  isDefault Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders Order[]
+  @@map("courier_partners")
 }
 // One row, holding the business details every invoice is printed with.
 // Blank until the admin fills it in on the Settings page.
@@ -460,8 +535,15 @@ model Order {
   // The courier carrying it and the number to track it with. Filled in by the
   // admin/support (or the courier's webhook), shown to the customer, the seller
   // and the support team.
+  // `courierPartnerId` is the configured courier that was picked; `courierName`
+  // is kept alongside it as the name at the time of booking, so an order still
+  // reads correctly after the partner is renamed or removed, and everything
+  // that already prints the courier's name keeps working untouched.
+  courierPartnerId String?
   courierName String?
   trackingNumber String?
+  // An override only. Left null -- the normal case -- the Track link is built
+  // from the partner's template, so changing that template changes every order.
   trackingUrl String?
   // Extra charge or discount lines the admin has added to this one's bill,
   // e.g. [{"label":"Handling","amountPaise":2000},{"label":"Goodwill","amountPaise":-5000}].
@@ -472,6 +554,9 @@ model Order {
   updatedAt DateTime @updatedAt
   user User? @relation(fields: [userId], references: [id])
   vendor Vendor? @relation(fields: [vendorId], references: [id])
+  // Removing a courier partner must not take its orders with it, so the link
+  // is cleared and the order keeps the name it was booked under.
+  courierPartner CourierPartner? @relation(fields: [courierPartnerId], references: [id], onDelete: SetNull)
   items OrderItem[]
   events ShipmentEvent[]
   tickets SupportTicket[]

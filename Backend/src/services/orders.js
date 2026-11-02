@@ -5,16 +5,25 @@ import { checkLimits, deadline, eligible, nextStatus, requireThat, totalFor, MAX
 import { checkoutSchema } from '../lib/validation.js';
 import { variantFor, priceFor } from '../lib/variants.js';
 import { notifyOrder } from './firebase.js';
+import { trackingLinkFor } from '../lib/courier.js';
 // Every item carries its own seller's shop name (null = NTSA's own stock)
 // and the product's photo, so anyone looking at an order -- the admin
 // list, a customer's own order, a packing slip -- can tell whose product
 // they're looking at, and what it actually looks like. The product itself
 // might since be edited or removed; this is a live join, not a snapshot,
 // so a since-changed photo is what shows (same as the name already works).
-export const orderInclude = { items: { include: { refund: true, seller: { select: { shopName: true } }, product: { select: { images: true, hsn: true, attributes: true } } } }, events: { orderBy: { occurredAt: 'asc' } } };
+// The courier partner comes along so the Track link can be built from its
+// template on the way out, rather than being frozen onto the order when the
+// shipment was booked.
+export const orderInclude = { items: { include: { refund: true, seller: { select: { shopName: true } }, product: { select: { images: true, hsn: true, attributes: true } } } }, events: { orderBy: { occurredAt: 'asc' } }, courierPartner: { select: { id: true, name: true, trackingUrlTemplate: true, contactPhone: true, contactEmail: true } } };
 export const ownerWhere = actor => actor.role === 'ADMIN' ? {} : actor.role === 'CUSTOMER' ? { userId: actor.id } : { vendorId: actor.id };
 export function publicOrder(order) {
-  const { deliveryOtpHash, deliveryOtpExpiresAt, deliveryOtpAttempts, ...safe } = order;
+  const { deliveryOtpHash, deliveryOtpExpiresAt, deliveryOtpAttempts, courierPartner, ...safe } = order;
+  // Everyone reading an order -- customer, seller, support -- gets one
+  // `trackingUrl` and doesn't care where it came from: the partner's current
+  // template, or a link typed on this order to override it.
+  safe.trackingUrl = trackingLinkFor(order);
+  safe.courier = courierPartner ? { id: courierPartner.id, name: courierPartner.name, contactPhone: courierPartner.contactPhone, contactEmail: courierPartner.contactEmail } : null;
   safe.items = safe.items.map(({ product, seller, ...item }) => ({ ...item, image: product?.images?.[0] ?? null, sellerName: seller?.shopName ?? null, refundEligible: eligible(item, order) }));
   safe.refundEligible = safe.items.some(item => item.refundEligible);
   // The journey, without the webhook bookkeeping.

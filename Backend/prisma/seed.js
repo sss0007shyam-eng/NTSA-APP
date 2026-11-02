@@ -216,6 +216,22 @@ try {
     await db.product.upsert({ where: { id }, update: fields, create: { id, stock: 40, ...fields } });
   }
 
+  // A starting list of the delivery companies NTSA is most likely to use, so
+  // the client can book a shipment on day one and switch courier from the
+  // panel without anyone touching code. Only written when the table is empty
+  // -- the admin's own list is never overwritten, and nothing here is
+  // upserted by name, so a renamed or removed courier stays removed.
+  // Each template has {awb} where the tracking number goes; the admin can
+  // correct any of these links from the Couriers screen.
+  if (await db.courierPartner.count() === 0) {
+    await db.courierPartner.createMany({ data: [
+      { name: 'Delhivery', trackingUrlTemplate: 'https://www.delhivery.com/track/package/{awb}', isDefault: true },
+      { name: 'Shiprocket', trackingUrlTemplate: 'https://shiprocket.co/tracking/{awb}' },
+      { name: 'Ecom Express', trackingUrlTemplate: 'https://ecomexpress.in/tracking/?awb_field={awb}' },
+      { name: 'XpressBees', trackingUrlTemplate: 'https://www.xpressbees.com/shipment/tracking?awbNo={awb}' },
+    ] });
+  }
+
   if (await db.banner.count() === 0) {
     await db.banner.create({ data: { title: 'Great Products\nBetter Living', buttonText: 'Shop Now', backgroundColor: '#13224A', sortOrder: 0 } });
   }

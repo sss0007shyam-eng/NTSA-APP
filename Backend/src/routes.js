@@ -6,13 +6,15 @@ import { randomInt, timingSafeEqual } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { db, atomic } from './db.js';
 import { config } from './config.js';
-import { z, productSchema, addressSchema, vendorCreateSchema, vendorUpdateSchema, vendorPasswordSchema, vendorMessageSchema, bannerSchema, reviewSchema, adminReviewSchema, couponSchema, staffCreateSchema, staffUpdateSchema, sellerApplicationSchema, sellerApproveSchema, sellerUpdateSchema, blockedPincodeSchema, deliveryRuleSchema, settingsSchema, invoiceExtrasSchema, panelPagesSchema, blockedAreaSchema } from './lib/validation.js';
+import { z, productSchema, addressSchema, vendorCreateSchema, vendorUpdateSchema, vendorPasswordSchema, vendorMessageSchema, bannerSchema, reviewSchema, adminReviewSchema, couponSchema, staffCreateSchema, staffUpdateSchema, sellerApplicationSchema, sellerApproveSchema, sellerUpdateSchema, sellerDeviceLoginSchema, sellerOtpSchema, blockedPincodeSchema, deliveryRuleSchema, courierPartnerSchema, courierPartnerUpdateSchema, settingsSchema, invoiceExtrasSchema, panelPagesSchema, blockedAreaSchema } from './lib/validation.js';
 import { requireThat, holidayGraceCutoff, HttpError } from './lib/rules.js';
 import { rankByImage, visualSearchEnabled } from './services/visualSearch.js';
 import { variantFor, priceFor, publicSizePrices } from './lib/variants.js';
 import { auth, roles, tokenFor } from './services/auth.js';
 import { verifyCustomer, pushToUser } from './services/firebase.js';
+import { knownDevice, registerDevice, startOtpChallenge, completeOtpChallenge, deviceLabel, listDevices } from './services/sellerDevices.js';
 import { recordShipmentEvent, normalizeStatus } from './services/shipping.js';
+import { trackingLinkFor, matchCourier, courierPartnerJoin } from './lib/courier.js';
 import { uploadImage, uploadAttachment } from './services/storage.js';
 import { gateway, validSignature } from './services/payments.js';
 import { checkout, ownedOrder, publicOrder, orderInclude, ownerWhere, changeStatus, cancelOrder, CANCELLABLE_BY_BUYER, deliveryCode, deliver, requestRefund, reviewRefund, assertDeliverable } from './services/orders.js';
@@ -34,7 +36,7 @@ async function customerSession(firebase) {
 // One login endpoint for every panel. Sellers and wholesale partners are
 // looked up by the username the admin gave them; panel staff by e-mail.
 router.post('/auth/login', loginLimiter, async (req, res) => {
-  const data = z.object({ username: z.string().min(1).max(200), password: z.string().min(1).max(200), role: z.enum(['ADMIN', 'VENDOR', 'SELLER']) }).parse(req.body);
+  const data = z.object({ username: z.string().min(1).max(200), password: z.string().min(1).max(200), role: z.enum(['ADMIN', 'VENDOR', 'SELLER']) }).extend(sellerDeviceLoginSchema.shape).parse(req.body);
   const account = data.role === 'ADMIN' ? await db.admin.findUnique({ where: { email: data.username.toLowerCase() } })
     : data.role === 'SELLER' ? await db.seller.findUnique({ where: { username: data.username } })
     : await db.vendor.findUnique({ where: { username: data.username } });
@@ -42,10 +44,40 @@ router.post('/auth/login', loginLimiter, async (req, res) => {
   // A disabled or removed seller/partner is turned away like a wrong password.
   const usable = data.role === 'ADMIN' ? account?.enabled : account?.enabled && !account?.deleted;
   requireThat(account && valid && usable, 401, 'Invalid credentials');
+  // A seller's shop panel is their till, so the right password on a laptop or
+  // phone we have never seen before buys a one-time code sent to the number
+  // the admin has on file -- not a session. Vendors and panel staff are
+  // unchanged: they sign in from the office, on known machines.
+  if (data.role === 'SELLER') {
+    const seen = { ip: req.ip, userAgent: req.get('user-agent') || '' };
+    if (!await knownDevice(account.id, data.deviceToken, seen)) {
+      const label = deviceLabel(seen.userAgent);
+      // The very first sign-in has no known device to compare against and no
+      // live session to protect, so it enrols this device instead of
+      // challenging it. Without that, every seller created before this
+      // existed -- and every seller the admin unlocks by clearing their
+      // devices -- would be shut out, because nothing can send the SMS yet
+      // (see services/sms.js). It is also what keeps the demo_seller dev
+      // login working untouched.
+      if (await db.sellerDevice.count({ where: { sellerId: account.id } }) > 0) {
+        return res.json(await startOtpChallenge(account, { label, ...seen }));
+      }
+      const deviceToken = await registerDevice(account.id, { label, ...seen });
+      return res.json({ token: tokenFor('SELLER', account), role: 'SELLER', name: account.shopName || undefined, deviceToken });
+    }
+  }
   // Panel staff sign in on the same page; the token carries their own role so
   // packing/sales only ever reach their own endpoints.
   const role = data.role === 'ADMIN' ? account.role : data.role;
   res.json({ token: tokenFor(role, account), role, name: account.name || account.shopName || undefined });
+});
+// Second step of a new-device seller sign-in. Only a correct code inside the
+// 10-minute window hands over a token, and it also enrols the device so the
+// seller isn't asked again on the same browser.
+router.post('/auth/login/otp', loginLimiter, async (req, res) => {
+  const data = sellerOtpSchema.parse(req.body);
+  const { seller, deviceToken } = await completeOtpChallenge({ challengeId: data.challengeId, otp: data.otp, ip: req.ip, userAgent: req.get('user-agent') || '' });
+  res.json({ token: tokenFor('SELLER', seller), role: 'SELLER', name: seller.shopName || undefined, deviceToken });
 });
 router.post('/auth/firebase', loginLimiter, async (req, res) => {
   const { idToken } = z.object({ idToken: z.string().min(1).max(10000) }).parse(req.body);
@@ -169,15 +201,23 @@ router.post('/webhooks/courier', async (req, res) => {
     location: z.string().trim().max(200).nullish(), remarks: z.string().trim().max(500).nullish(),
     timestamp: z.string().max(40).nullish(), courier: z.string().trim().max(80).nullish(),
   }).parse(req.body);
-  const order = await db.order.findFirst({ where: { trackingNumber: body.awb }, orderBy: { createdAt: 'desc' }, select: { id: true, courierName: true } });
+  const order = await db.order.findFirst({ where: { trackingNumber: body.awb }, orderBy: { createdAt: 'desc' }, select: { id: true, courierName: true, courierPartnerId: true } });
   if (!order) { console.warn('Courier webhook for an unknown AWB', body.awb); return res.status(202).json({ ok: true, matched: false }); }
+  // The courier keeps sending its own name, so the name is matched against the
+  // configured partners rather than trusted as-is: a partner the admin has
+  // since renamed, or one the courier spells differently ("ecom-express"),
+  // still resolves (lib/courier.js). A partner it resolves to is also linked
+  // onto the order when nothing was linked -- e.g. the shipment was booked by
+  // typing the name -- so the Track link starts working from this event on.
+  const partner = matchCourier(body.courier, await db.courierPartner.findMany({ select: { id: true, name: true } }));
+  if (partner && !order.courierPartnerId) await db.order.update({ where: { id: order.id }, data: { courierPartnerId: partner.id } });
   const status = normalizeStatus(body.status);
   const when = body.timestamp && !Number.isNaN(Date.parse(body.timestamp)) ? new Date(body.timestamp) : new Date();
   const result = await recordShipmentEvent({
     orderId: order.id, status, title: status === 'UPDATE' ? body.status : undefined, location: body.location, note: body.remarks,
-    source: 'COURIER', actorName: body.courier || order.courierName, occurredAt: when, dedupeKey: `${body.awb}:${body.status}:${when.toISOString()}`,
+    source: 'COURIER', actorName: partner?.name || body.courier || order.courierName, occurredAt: when, dedupeKey: `${body.awb}:${body.status}:${when.toISOString()}`,
   });
-  res.json({ ok: true, matched: true, duplicate: result.duplicate });
+  res.json({ ok: true, matched: true, courier: partner?.name ?? null, duplicate: result.duplicate });
 });
 router.use(auth);
 router.get('/me', async (req, res) => {
@@ -429,6 +469,7 @@ router.get('/admin/late-orders', async (req, res) => {
         items: { select: { id: true, name: true, quantity: true, packedAt: true, sellerId: true, seller: { select: { id: true, shopName: true, ownerName: true, phone: true } } } },
         events: { orderBy: { occurredAt: 'desc' }, take: 1, select: { title: true, location: true, occurredAt: true } },
         tickets: { where: { status: 'OPEN' }, select: { id: true, kind: true, awaitingDeliveryTeam: true } },
+        ...courierPartnerJoin,
       },
     }),
     getSettings(),
@@ -442,7 +483,7 @@ router.get('/admin/late-orders', async (req, res) => {
       return {
         id: o.id, status: o.status, totalPaise: o.totalPaise, paymentMethod: o.paymentMethod, createdAt: o.createdAt,
         dueAt, hoursLate: Math.floor(lateMs / 3600000), daysLate: Math.floor(lateMs / DAY), deliveryPartner: o.deliveryPartner,
-        courierName: o.courierName, trackingNumber: o.trackingNumber, trackingUrl: o.trackingUrl, lastEvent: o.events[0] ?? null,
+        courierName: o.courierName, trackingNumber: o.trackingNumber, trackingUrl: trackingLinkFor(o), lastEvent: o.events[0] ?? null,
         customer: { name: o.address?.name || o.user?.name || o.vendor?.name || 'Customer', phone: o.address?.phone || o.user?.phone || o.vendor?.phone || null, city: o.address?.city || null },
         sellers,
         unpackedCount: o.items.filter(i => i.sellerId && !i.packedAt).length,
@@ -494,6 +535,37 @@ router.post('/admin/delivery-rules', async (req, res) => {
 });
 router.delete('/admin/delivery-rules/:id', async (req, res) => {
   await db.deliveryRule.deleteMany({ where: { id: req.params.id } });
+  res.status(204).end();
+});
+
+// The delivery companies the client works with. The point of keeping them
+// here rather than typing one per order: switching delivery company, or fixing
+// a courier's tracking link, is one edit on this screen and it takes effect on
+// every order that courier is carrying (the Track link is built from the
+// template on read -- see lib/courier.js).
+router.get('/admin/couriers', async (req, res) => res.json(await db.courierPartner.findMany({ orderBy: [{ isDefault: 'desc' }, { name: 'asc' }] })));
+router.post('/admin/couriers', async (req, res) => {
+  const data = courierPartnerSchema.parse(req.body);
+  res.status(201).json(await atomic(async tx => {
+    if (data.isDefault) await tx.courierPartner.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
+    return tx.courierPartner.create({ data });
+  }));
+});
+router.put('/admin/couriers/:id', async (req, res) => {
+  const data = courierPartnerUpdateSchema.parse(req.body);
+  res.json(await atomic(async tx => {
+    // Exactly one default, so making this one the default stands the others down.
+    if (data.isDefault) await tx.courierPartner.updateMany({ where: { isDefault: true, id: { not: req.params.id } }, data: { isDefault: false } });
+    const saved = await tx.courierPartner.update({ where: { id: req.params.id }, data });
+    // A switched-off courier can't stay the one the panel offers first.
+    return saved.active ? saved : tx.courierPartner.update({ where: { id: saved.id }, data: { isDefault: false } });
+  }));
+});
+// Removing a courier leaves its past orders alone: the link on the order is
+// cleared (schema.prisma: onDelete SetNull) and each keeps the courier name it
+// was booked under, so order history doesn't go blank.
+router.delete('/admin/couriers/:id', async (req, res) => {
+  await db.courierPartner.deleteMany({ where: { id: req.params.id } });
   res.status(204).end();
 });
 
@@ -726,9 +798,9 @@ const REPORT_WINDOW_DAYS = 14;
 const publicTicket = t => ({
   id: t.id, kind: t.kind, subject: t.subject, status: t.status, orderId: t.orderId, rating: t.rating, createdAt: t.createdAt, updatedAt: t.updatedAt,
   messages: (t.messages || []).filter(m => !m.internal).map(({ sender, name, body, at }) => ({ sender, name, body, at })),
-  order: t.order ? { id: t.order.id, status: t.order.status, courierName: t.order.courierName, trackingNumber: t.order.trackingNumber, trackingUrl: t.order.trackingUrl } : null,
+  order: t.order ? { id: t.order.id, status: t.order.status, courierName: t.order.courierName, trackingNumber: t.order.trackingNumber, trackingUrl: trackingLinkFor(t.order) } : null,
 });
-const ticketInclude = { order: { select: { id: true, status: true, courierName: true, trackingNumber: true, trackingUrl: true } } };
+const ticketInclude = { order: { select: { id: true, status: true, courierName: true, trackingNumber: true, trackingUrl: true, ...courierPartnerJoin } } };
 // "I didn't get it / it came broken": opens (or adds to) one support request for
 // the order. Support gets the order, courier and timeline beside it; the seller
 // sees a "problem reported" step on their copy of the order.
@@ -771,13 +843,18 @@ router.post('/tickets/:id/message', customer, async (req, res) => {
   res.json(publicTicket(updated));
 });
 // ---------- Support team panel (ADMIN + SUPPORT) ----------
-router.get('/support/tickets', support, async (req, res) => res.json(await db.supportTicket.findMany({
-  include: {
-    seller: { select: { shopName: true } }, user: { select: { name: true, phone: true } },
-    order: { select: { id: true, status: true, courierName: true, trackingNumber: true, trackingUrl: true, deliveryPartner: true, expectedDeliveryAt: true } },
-  },
-  orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }], take: 300,
-})));
+router.get('/support/tickets', support, async (req, res) => {
+  const tickets = await db.supportTicket.findMany({
+    include: {
+      seller: { select: { shopName: true } }, user: { select: { name: true, phone: true } },
+      order: { select: { id: true, status: true, courierName: true, trackingNumber: true, trackingUrl: true, deliveryPartner: true, expectedDeliveryAt: true, ...courierPartnerJoin } },
+    },
+    orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }], take: 300,
+  });
+  // The courier partner is joined only so the Track link can be built from its
+  // template here; it doesn't need to go out with the ticket.
+  res.json(tickets.map(t => ({ ...t, order: t.order ? { ...t.order, courierPartner: undefined, trackingUrl: trackingLinkFor(t.order) } : null })));
+});
 // Everything support needs about one order in one place: who ordered it, whose
 // products, which courier and AWB, the whole journey so far, and who to call --
 // the delivery team, the customer, the sellers.
@@ -789,14 +866,19 @@ router.get('/support/orders/:id', support, async (req, res) => {
         user: { select: { name: true, phone: true } }, vendor: { select: { name: true, phone: true } }, events: { orderBy: { occurredAt: 'asc' } },
         items: { include: { seller: { select: { id: true, shopName: true, ownerName: true, phone: true } } } },
         tickets: { select: { id: true, kind: true, status: true, subject: true, awaitingDeliveryTeam: true }, orderBy: { createdAt: 'desc' } },
+        ...courierPartnerJoin,
       },
     }),
     getSettings(),
   ]);
   requireThat(order, 404, 'Order not found');
-  const { user, vendor, items, deliveryOtpHash, deliveryOtpExpiresAt, deliveryOtpAttempts, ...rest } = order;
+  const { user, vendor, items, deliveryOtpHash, deliveryOtpExpiresAt, deliveryOtpAttempts, courierPartner, ...rest } = order;
   res.json({
     ...rest, deliveryTeamPhone: settings?.deliveryTeamPhone ?? null,
+    trackingUrl: trackingLinkFor(order),
+    // The courier's own contacts, so support can chase the parcel with the
+    // company carrying it rather than only with NTSA's delivery team.
+    courier: courierPartner ? { name: courierPartner.name, contactPhone: courierPartner.contactPhone, contactEmail: courierPartner.contactEmail } : null,
     customer: { name: order.address?.name || user?.name || vendor?.name || 'Customer', phone: order.address?.phone || user?.phone || vendor?.phone || null, address: order.address },
     sellers: [...new Map(items.filter(i => i.seller).map(i => [i.seller.id, i.seller])).values()],
     items: items.map(i => ({ id: i.id, name: i.name, quantity: i.quantity, unitPaise: i.unitPaise, sellerName: i.seller?.shopName ?? null, packedAt: i.packedAt })),
@@ -804,16 +886,35 @@ router.get('/support/orders/:id', support, async (req, res) => {
 });
 // Courier and tracking number, when the admin/support books the shipment (or
 // corrects it). Leaves a line on the order's journey so everyone sees who set it.
+// The configured couriers the panel offers when booking a shipment. Readable
+// by support as well as the admin -- support books the shipments; only the
+// admin may change the list (/admin/couriers below).
+router.get('/support/couriers', support, async (req, res) => res.json(await db.courierPartner.findMany({
+  where: { active: true }, orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+  select: { id: true, name: true, trackingUrlTemplate: true, contactPhone: true, contactEmail: true, isDefault: true },
+})));
 router.put('/support/orders/:id/tracking', support, async (req, res) => {
   const data = z.object({
-    courierName: z.string().trim().min(1).max(80), trackingNumber: z.string().trim().min(3).max(60),
+    // Normally the panel sends `courierId`, one of the configured partners.
+    // `courierName` stays accepted on its own for a courier that isn't set up
+    // yet, and `trackingUrl` stays an override for a link the template can't
+    // build (a one-off portal, a consolidated manifest link).
+    courierId: z.string().trim().max(60).nullish(),
+    courierName: z.string().trim().min(1).max(80).nullish(), trackingNumber: z.string().trim().min(3).max(60),
     trackingUrl: z.string().trim().url().max(500).refine(v => v.startsWith('https://'), 'Tracking link must use HTTPS').nullish(),
   }).parse(req.body);
   const order = await db.order.findUnique({ where: { id: req.params.id }, select: { status: true } });
   requireThat(order, 404, 'Order not found');
   requireThat(!['PENDING_PAYMENT', 'CANCELLED'].includes(order.status), 400, 'This order cannot be shipped');
-  await db.order.update({ where: { id: req.params.id }, data: { courierName: data.courierName, trackingNumber: data.trackingNumber, trackingUrl: data.trackingUrl || null } });
-  await recordShipmentEvent({ orderId: req.params.id, status: 'UPDATE', title: `Courier: ${data.courierName}, tracking number ${data.trackingNumber}`, source: req.actor.role === 'ADMIN' ? 'ADMIN' : 'SUPPORT', actorName: req.actor.account.name });
+  const partner = data.courierId ? await db.courierPartner.findUnique({ where: { id: data.courierId } }) : null;
+  requireThat(!data.courierId || partner, 404, 'That courier is no longer set up');
+  // The partner's name is also written onto the order, as the name it was
+  // booked under: everything that already prints the courier's name keeps
+  // working, and the order still reads right if the partner is later renamed.
+  const courierName = partner?.name ?? data.courierName;
+  requireThat(courierName, 400, 'Pick a courier, or type the name of one that is not set up');
+  await db.order.update({ where: { id: req.params.id }, data: { courierPartnerId: partner?.id ?? null, courierName, trackingNumber: data.trackingNumber, trackingUrl: data.trackingUrl || null } });
+  await recordShipmentEvent({ orderId: req.params.id, status: 'UPDATE', title: `Courier: ${courierName}, tracking number ${data.trackingNumber}`, source: req.actor.role === 'ADMIN' ? 'ADMIN' : 'SUPPORT', actorName: req.actor.account.name });
   res.json(publicOrder(await ownedOrder({ role: 'ADMIN' }, req.params.id)));
 });
 // For couriers with no webhook: the admin/support adds a step by hand. Only the
@@ -1097,6 +1198,19 @@ router.delete('/admin/sellers/:id', async (req, res) => {
   await db.seller.update({ where: { id: req.params.id }, data: { deleted: true, enabled: false, sessionVersion: { increment: 1 } } });
   res.status(204).end();
 });
+// Where a seller is signed in. The admin needs this when a seller is locked
+// out of their own panel -- no SMS gateway is wired up yet, so clearing the
+// devices is the only way back in: the next sign-in is then a first-ever one
+// and enrols itself (see /auth/login). Verify who is asking by phone first.
+router.get('/admin/sellers/:id/devices', async (req, res) => res.json(await listDevices(req.params.id)));
+router.delete('/admin/sellers/:id/devices', async (req, res) => {
+  const { count } = await db.sellerDevice.deleteMany({ where: { sellerId: req.params.id } });
+  await db.sellerLoginChallenge.deleteMany({ where: { sellerId: req.params.id } });
+  // Bumping the session version signs the removed devices out now rather than
+  // letting a token already in a browser run for the rest of its 8 hours.
+  await db.seller.update({ where: { id: req.params.id }, data: { sessionVersion: { increment: 1 } } });
+  res.json({ removed: count });
+});
 // "View their dashboard": a real seller-role token so the admin's browser
 // can open the actual seller panel, signed in as them -- not a copy of the
 // page, the same site. Blocked the same way a real login would be if the
@@ -1185,6 +1299,18 @@ router.post('/seller/products/:id/duplicate', seller, async (req, res) => {
 // business, not the seller's.
 // A seller's own alerts: delivered, delivery failed, being returned, or the
 // customer reported a problem with their item.
+// The seller's own list of signed-in devices, and a way to throw one off.
+router.get('/seller/devices', seller, async (req, res) => res.json(await listDevices(req.actor.id)));
+router.delete('/seller/devices/:id', seller, async (req, res) => {
+  const { count } = await db.sellerDevice.deleteMany({ where: { id: req.params.id, sellerId: req.actor.id } });
+  requireThat(count, 404, 'Device not found');
+  // A removed laptop must stop working immediately, and the session version is
+  // per account, not per device -- so every signed-in device is logged out and
+  // the ones the seller kept simply sign in again (they stay enrolled, so no
+  // OTP). Said plainly on the button in the panel.
+  await db.seller.update({ where: { id: req.actor.id }, data: { sessionVersion: { increment: 1 } } });
+  res.status(204).end();
+});
 router.get('/seller/notifications', seller, async (req, res) => res.json(await db.notification.findMany({ where: { audience: `SELLER:${req.actor.id}` }, orderBy: { createdAt: 'desc' }, take: 100 })));
 router.post('/seller/notifications/read', seller, async (req, res) => {
   await db.notification.updateMany({ where: { audience: `SELLER:${req.actor.id}`, readAt: null }, data: { readAt: new Date() } });
@@ -1194,7 +1320,7 @@ router.get('/seller/orders', seller, async (req, res) => {
   const commissionPercent = req.actor.account.commissionPercent;
   const items = await db.orderItem.findMany({
     where: { sellerId: req.actor.id },
-    include: { order: { select: { id: true, status: true, createdAt: true, paymentMethod: true, vendorId: true, address: true, deliveryPartner: true, expectedDeliveryAt: true, deliveredAt: true, courierName: true, trackingNumber: true, trackingUrl: true,
+    include: { order: { select: { id: true, status: true, createdAt: true, paymentMethod: true, vendorId: true, address: true, deliveryPartner: true, expectedDeliveryAt: true, deliveredAt: true, courierName: true, trackingNumber: true, trackingUrl: true, ...courierPartnerJoin,
       events: { select: { id: true, status: true, title: true, location: true, occurredAt: true }, orderBy: { occurredAt: 'asc' } },
       tickets: { where: { status: 'OPEN', kind: { not: 'GENERAL' } }, select: { id: true, kind: true } } } }, product: { select: { images: true } } },
     orderBy: { id: 'desc' }, take: 200,
@@ -1205,7 +1331,7 @@ router.get('/seller/orders', seller, async (req, res) => {
     return { ...item, image: product.images[0] ?? null, orderId: order.id, status: order.status, placedAt: order.createdAt,
       buyerName: order.address?.name || null, buyer: order.vendorId ? 'Wholesale' : 'Customer', address: order.address || null,
       deliveryPartner: order.deliveryPartner || null, expectedDeliveryAt: order.expectedDeliveryAt || null, deliveredAt: order.deliveredAt || null,
-      courierName: order.courierName || null, trackingNumber: order.trackingNumber || null, trackingUrl: order.trackingUrl || null,
+      courierName: order.courierName || null, trackingNumber: order.trackingNumber || null, trackingUrl: trackingLinkFor(order),
       events: order.events, openIssues: order.tickets,
       grossPaise, commissionPercent, commissionPaise, netPaise: grossPaise - commissionPaise };
   }));
