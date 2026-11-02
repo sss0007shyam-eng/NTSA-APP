@@ -28,6 +28,14 @@ export async function api(path, options = {}) {
   if (!response.ok) throw new Error(data?.error || 'Request failed');
   return data;
 }
+// Proof that this browser has signed in to this shop before. A sign-in that
+// can't show it is treated as a new laptop or phone and has to clear an OTP
+// texted to the shop's registered number. Kept in localStorage, not
+// sessionStorage: closing the tab must not turn the same laptop into a
+// stranger. It is only a device marker -- it grants nothing on its own.
+const DEVICE_KEY = 'ntsa-seller-device';
+export function deviceToken() { try { return localStorage.getItem(DEVICE_KEY) || undefined; } catch { return undefined; } }
+export function rememberDevice(token) { try { if (token) localStorage.setItem(DEVICE_KEY, token); } catch { /* private window: the seller just gets an OTP next time */ } }
 export const money = amount => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format((amount || 0) / 100);
 export function paise(value) {
   if (!/^\d+(\.\d{1,2})?$/.test(String(value))) throw new Error('Enter a positive amount with at most two decimal places');

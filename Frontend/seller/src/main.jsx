@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { LayoutDashboard, Package, ShoppingBag, LogOut, Plus, ArrowUpRight, ChevronRight, Check, Menu, ShieldCheck, Wallet, Store, Search, BadgeCheck, Truck, Image, X, Percent, PackageCheck, BarChart3, PieChart, LifeBuoy, Settings as SettingsIcon, Eye, EyeOff, TrendingUp, Bell, AlertTriangle } from 'lucide-react';
-import { api, money, paise, suggestCategory } from './api';
+import { LayoutDashboard, Package, ShoppingBag, LogOut, Plus, ArrowUpRight, ChevronRight, Check, Menu, ShieldCheck, Wallet, Store, Search, BadgeCheck, Truck, Image, X, Percent, PackageCheck, BarChart3, PieChart, LifeBuoy, Settings as SettingsIcon, Eye, EyeOff, TrendingUp, Bell, AlertTriangle, Smartphone, Laptop } from 'lucide-react';
+import { api, money, paise, suggestCategory, deviceToken, rememberDevice } from './api';
 import { Button, Field, PasswordField, Badge, Empty, Modal, Stat, ProductImage, CONDITION_LABEL } from './ui';
 import './style.css';
 
@@ -400,6 +400,7 @@ function SellerSettingsPage({ me, busy, action, onHoliday, onPasswordChanged }) 
         <Button secondary={!me?.onHoliday} onClick={onHoliday} disabled={busy} style={{ marginTop: 12 }}>{me?.onHoliday ? 'End holiday & go live' : 'Go on holiday'}</Button>
       </div>
     </section>
+    <SellerDevices busy={busy} action={action} onRevoked={onPasswordChanged}/>
     <section className="panel">
       <div className="panel-heading"><div><h2>Change password</h2><p>Changing it signs you out of every other device.</p></div></div>
       <form className="editor" style={{ padding: '18px 24px' }} onSubmit={e => {
@@ -416,6 +417,28 @@ function SellerSettingsPage({ me, busy, action, onHoliday, onPasswordChanged }) 
       </form>
     </section>
   </>;
+}
+/// Where this shop is signed in. A device the seller doesn't recognise is the
+/// first sign that someone else has their password, so the list is theirs to
+/// clear without waiting for the admin.
+function SellerDevices({ busy, action, onRevoked }) {
+  const [devices, setDevices] = useState(null);
+  useEffect(() => { api('/seller/devices').then(setDevices).catch(() => setDevices([])); }, []);
+  return <section className="panel" style={{ marginBottom: 22 }}>
+    <div className="panel-heading"><div><h2>Devices</h2><p>The laptops and phones signed in to your shop. Signing in on a new one sends a code to your registered number.</p></div></div>
+    <div className="table-scroll"><table><thead><tr><th>Device</th><th>First used</th><th>Last used</th><th/></tr></thead><tbody>
+      {(devices || []).map(d => <tr key={d.id}>
+        <td><strong style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{/Android|iPhone/.test(d.label) ? <Smartphone size={15}/> : <Laptop size={15}/>}{d.label}</strong>{d.lastIp && <small className="muted">{d.lastIp}</small>}</td>
+        <td><small>{new Date(d.createdAt).toLocaleString('en-IN')}</small></td>
+        <td><small>{new Date(d.lastUsedAt).toLocaleString('en-IN')}</small></td>
+        {/* The session version is per account, not per device, so removing one
+            signs every device out -- said plainly rather than surprising the
+            seller. The ones they kept sign back in with no code. */}
+        <td><div className="row-actions"><button className="danger-text" disabled={busy} onClick={() => action(async () => { await api(`/seller/devices/${d.id}`, { method: 'DELETE' }); onRevoked(); }, 'Device removed — please sign in again')}>Remove &amp; sign out everywhere</button></div></td>
+      </tr>)}
+    </tbody></table></div>
+    {devices && !devices.length && <Empty text="No devices on record yet"/>}
+  </section>;
 }
 // A dependency-free bar chart of the last 14 days' sales, drawn straight from
 // the seller's own order lines (gross value, cancelled lines left out). Kept as
@@ -527,6 +550,21 @@ function SellerOrderDetail({ order, onSupport }) {
 
 function Login({ onLogin }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  // A sign-in from a laptop or phone NTSA hasn't seen before stops here: the
+  // password was right, but the shop's registered number has been texted a
+  // code, and nothing is handed over until that code is entered.
+  const [challenge, setChallenge] = useState(null);
+  const signedIn = r => { rememberDevice(r.deviceToken); onLogin(r.token); };
+  const step = handler => async e => {
+    e.preventDefault(); setBusy(true); setError('');
+    try { await handler(Object.fromEntries(new FormData(e.target))); }
+    catch (err) { setError(err.message); } finally { setBusy(false); }
+  };
+  const submitPassword = step(async f => {
+    const r = await api('/auth/login', { method: 'POST', body: { role: 'SELLER', username: f.username, password: f.password, deviceToken: deviceToken() } });
+    if (r.otpRequired) setChallenge(r); else signedIn(r);
+  });
+  const submitOtp = step(async f => signedIn(await api('/auth/login/otp', { method: 'POST', body: { challengeId: challenge.challengeId, otp: f.otp } })));
   return <div className="login">
     <section className="login-story">
       <div className="brand"><img className="brand-logo" src="/ntsa_logo.png" alt="NTSA"/></div>
@@ -540,22 +578,30 @@ function Login({ onLogin }) {
     </section>
     <section className="login-form"><div>
       <div className="eyebrow">SELLER SIGN IN</div>
-      <h2>Welcome back.</h2>
-      <p>Use the seller ID and password the NTSA team gave you.</p>
-      <form style={{ marginTop: 28 }} onSubmit={async e => {
-        e.preventDefault(); setBusy(true); setError('');
-        const data = new FormData(e.target);
-        try {
-          const r = await api('/auth/login', { method: 'POST', body: { role: 'SELLER', username: data.get('username'), password: data.get('password') } });
-          onLogin(r.token);
-        } catch (err) { setError(err.message); } finally { setBusy(false); }
-      }}>
-        <Field label="Seller ID" name="username" placeholder="Your assigned seller ID" required autoComplete="username"/>
-        <PasswordField label="Password" name="password" placeholder="Enter your password" required autoComplete="current-password"/>
-        {error && <div role="alert" className="alert">{error}</div>}
-        <Button disabled={busy}>{busy ? 'Signing in…' : 'Sign in to your shop'}<ArrowUpRight size={18}/></Button>
-      </form>
-      <p className="login-help"><ShieldCheck size={17}/>Your account is created by the NTSA administrator.</p>
+      {challenge ? <>
+        <h2>One more step.</h2>
+        <p>This is a new device ({challenge.device}), so we've sent a 6-digit code to the number NTSA has on file{challenge.phoneHint ? ` (${challenge.phoneHint})` : ''}.</p>
+        <form style={{ marginTop: 28 }} onSubmit={submitOtp}>
+          <Field label="6-digit code" name="otp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="______" required autoComplete="one-time-code" autoFocus/>
+          {/* Dev stand-in, mirroring the customer demo login: with no SMS
+              gateway configured the server hands the code back instead. */}
+          {challenge.demoOtp && <div className="alert">Demo mode — no SMS was sent. Your code is {challenge.demoOtp}.</div>}
+          {error && <div role="alert" className="alert">{error}</div>}
+          <Button disabled={busy}>{busy ? 'Checking…' : 'Confirm and sign in'}<ArrowUpRight size={18}/></Button>
+        </form>
+        <p className="login-help"><ShieldCheck size={17}/>Code not arriving? Ask the NTSA administrator to check the number on your account.</p>
+        <Button secondary type="button" style={{ marginTop: 10 }} onClick={() => { setChallenge(null); setError(''); }}>Use a different seller ID</Button>
+      </> : <>
+        <h2>Welcome back.</h2>
+        <p>Use the seller ID and password the NTSA team gave you.</p>
+        <form style={{ marginTop: 28 }} onSubmit={submitPassword}>
+          <Field label="Seller ID" name="username" placeholder="Your assigned seller ID" required autoComplete="username"/>
+          <PasswordField label="Password" name="password" placeholder="Enter your password" required autoComplete="current-password"/>
+          {error && <div role="alert" className="alert">{error}</div>}
+          <Button disabled={busy}>{busy ? 'Signing in…' : 'Sign in to your shop'}<ArrowUpRight size={18}/></Button>
+        </form>
+        <p className="login-help"><ShieldCheck size={17}/>Signing in on a new laptop or phone sends a code to your registered number.</p>
+      </>}
     </div></section>
   </div>;
 }
