@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -357,6 +358,11 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 if (item.variantText.isNotEmpty) Text(item.variantText, style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                 if (refundLabel != null)
                   Text(refundLabel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: item.refundStatus == 'REJECTED' ? AppColors.danger : item.refundStatus == 'APPROVED' ? AppColors.success : AppColors.orange)),
+                // The return clock, ticking down to the moment the window shuts,
+                // so the customer sees how long is left instead of a button that
+                // vanishes without warning. Units only (d/h/m/s), no words, so it
+                // reads the same in every language.
+                if (canRefund && item.refundExpiresAt != null) _ReturnCountdown(expiresAt: item.refundExpiresAt!),
                 if (canRefund)
                   TextButton(
                     style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
@@ -543,6 +549,62 @@ class _RefundDialogState extends State<_RefundDialog> {
         TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(context.tr('common.cancel'))),
         TextButton(onPressed: valid ? () => Navigator.of(context).pop(_reason.text.trim()) : null, child: Text(context.tr('orders.refund.submit'))),
       ],
+    );
+  }
+}
+
+/// The return-window clock on a delivered item. Ticks once a second down to
+/// [expiresAt] and shows how long is left, in units only (d/h/m/s) so it reads
+/// the same in every language. Turns red in the last hour. Hides itself the
+/// moment the window shuts -- the parent stops offering the return then too.
+class _ReturnCountdown extends StatefulWidget {
+  const _ReturnCountdown({required this.expiresAt});
+  final DateTime expiresAt;
+
+  @override
+  State<_ReturnCountdown> createState() => _ReturnCountdownState();
+}
+
+class _ReturnCountdownState extends State<_ReturnCountdown> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  // "1d 4h" far out, "3h 20m" within a day, "4m 30s" within an hour.
+  String _left(Duration d) {
+    if (d.inDays >= 1) return '${d.inDays}d ${d.inHours % 24}h';
+    if (d.inHours >= 1) return '${d.inHours}h ${d.inMinutes % 60}m';
+    return '${d.inMinutes}m ${d.inSeconds % 60}s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final left = widget.expiresAt.difference(DateTime.now());
+    if (left.isNegative) return const SizedBox.shrink();
+    final urgent = left.inHours < 1;
+    final color = urgent ? AppColors.danger : AppColors.orange;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.timer_outlined, size: 13, color: color),
+          const SizedBox(width: 4),
+          Text(_left(left), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+        ],
+      ),
     );
   }
 }

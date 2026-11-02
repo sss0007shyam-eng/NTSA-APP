@@ -24,7 +24,10 @@ export function publicOrder(order) {
   // template, or a link typed on this order to override it.
   safe.trackingUrl = trackingLinkFor(order);
   safe.courier = courierPartner ? { id: courierPartner.id, name: courierPartner.name, contactPhone: courierPartner.contactPhone, contactEmail: courierPartner.contactEmail } : null;
-  safe.items = safe.items.map(({ product, seller, ...item }) => ({ ...item, image: product?.images?.[0] ?? null, sellerName: seller?.shopName ?? null, refundEligible: eligible(item, order) }));
+  // `refundExpiresAt` goes to the app so the customer can see the return clock
+  // counting down, not just a button that silently appears and vanishes.
+  // `refundWindowHours` lets the app say the policy up front ("2-hour return").
+  safe.items = safe.items.map(({ product, seller, ...item }) => ({ ...item, image: product?.images?.[0] ?? null, sellerName: seller?.shopName ?? null, refundEligible: eligible(item, order), refundExpiresAt: eligible(item, order) ? item.refundExpiresAt : null, refundWindowHours: item.refundWindowHours }));
   safe.refundEligible = safe.items.some(item => item.refundEligible);
   // The journey, without the webhook bookkeeping.
   safe.events = (order.events || []).map(({ id, status, title, location, note, source, occurredAt }) => ({ id, status, title, location, note, source, occurredAt }));

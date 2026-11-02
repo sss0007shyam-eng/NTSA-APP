@@ -1,5 +1,5 @@
 class OrderItem {
-  OrderItem({this.id = '', this.productId, required this.name, required this.quantity, required this.unitPaise, this.refundEligible = false, this.refundStatus, this.size, this.color, this.grade});
+  OrderItem({this.id = '', this.productId, required this.name, required this.quantity, required this.unitPaise, this.refundEligible = false, this.refundExpiresAt, this.refundWindowHours = 0, this.refundStatus, this.size, this.color, this.grade});
 
   final String id;
   /// The product this line was bought from; lets "Buy again" re-add it. May be
@@ -13,6 +13,11 @@ class OrderItem {
   final int quantity;
   final int unitPaise;
   final bool refundEligible;
+  /// When this line's return window shuts. Set only while a return is still
+  /// open, so the app can count down to it; null otherwise.
+  final DateTime? refundExpiresAt;
+  /// The product's own return window, in hours, shown before buying.
+  final int refundWindowHours;
   /// REQUESTED / APPROVED / REJECTED once a refund has been requested.
   final String? refundStatus;
 
@@ -23,6 +28,8 @@ class OrderItem {
         quantity: (json['quantity'] as num).toInt(),
         unitPaise: (json['unitPaise'] as num).toInt(),
         refundEligible: json['refundEligible'] as bool? ?? false,
+        refundExpiresAt: json['refundExpiresAt'] != null ? DateTime.tryParse(json['refundExpiresAt'] as String)?.toLocal() : null,
+        refundWindowHours: (json['refundWindowHours'] as num?)?.toInt() ?? 0,
         refundStatus: (json['refund'] as Map?)?['status'] as String?,
         size: json['size'] as String?,
         color: json['color'] as String?,
