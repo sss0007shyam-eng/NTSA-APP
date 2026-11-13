@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/app_colors.dart';
@@ -195,6 +196,31 @@ class _AddAddressSheetState extends State<_AddAddressSheet> {
   String? _required(String? v) => (v ?? '').trim().isEmpty ? context.tr('checkout.address.required') : null;
   static String _cleanPhone(String v) => v.replaceAll(RegExp(r'[\s\-()]'), '');
 
+  bool _pinLoading = false;
+  String _lookedUpPin = '';
+
+  // A 6-digit PIN decides the city and state, so fill them from India Post's
+  // free lookup the moment one is typed. If it is offline or unknown, the
+  // customer just types them by hand -- the fields stay editable either way.
+  Future<void> _lookupPin(String pin) async {
+    if (pin == _lookedUpPin) return;
+    _lookedUpPin = pin;
+    setState(() => _pinLoading = true);
+    try {
+      final res = await Dio().get('https://api.postalpincode.in/pincode/$pin');
+      final data = res.data;
+      if (data is List && data.isNotEmpty && data.first['Status'] == 'Success') {
+        final offices = data.first['PostOffice'] as List?;
+        if (offices != null && offices.isNotEmpty) {
+          final po = offices.first as Map;
+          if (po['District'] != null) _city.text = po['District'].toString();
+          if (po['State'] != null) _state.text = po['State'].toString();
+        }
+      }
+    } catch (_) {/* offline or not found -- leave the fields for the customer */}
+    if (mounted) setState(() => _pinLoading = false);
+  }
+
   @override
   void dispose() {
     for (final c in [_name, _phone, _line1, _city, _state, _postalCode]) {
@@ -234,8 +260,13 @@ class _AddAddressSheetState extends State<_AddAddressSheet> {
               TextFormField(
                 controller: _postalCode,
                 maxLength: 6,
-                decoration: InputDecoration(labelText: context.tr('checkout.address.postal_code'), counterText: ''),
+                decoration: InputDecoration(
+                  labelText: context.tr('checkout.address.postal_code'),
+                  counterText: '',
+                  suffixIcon: _pinLoading ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))) : null,
+                ),
                 keyboardType: TextInputType.number,
+                onChanged: (v) { if (RegExp(r'^[0-9]{6}$').hasMatch(v.trim())) _lookupPin(v.trim()); },
                 validator: (v) => RegExp(r'^[0-9]{6}$').hasMatch(v?.trim() ?? '') ? null : context.tr('checkout.address.pin_invalid'),
               ),
               const SizedBox(height: 16),
