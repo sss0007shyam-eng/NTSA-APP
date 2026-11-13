@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 import '../../core/api_client.dart';
 import '../../core/app_colors.dart';
@@ -199,8 +199,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                   icon: const Icon(Icons.share_outlined),
                   onPressed: () {
                     final price = (p.pricePaise / 100).toStringAsFixed(0);
-                    Clipboard.setData(ClipboardData(text: context.tr('pdp.share.text', {'name': p.name, 'price': price})));
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('pdp.share.copied'))));
+                    final text = context.tr('pdp.share.text', {'name': p.name, 'price': price});
+                    final link = 'https://ntsa-web.vercel.app/product/${p.id}';
+                    SharePlus.instance.share(ShareParams(text: '$text\n$link', subject: p.name));
                   },
                 ),
               ],
