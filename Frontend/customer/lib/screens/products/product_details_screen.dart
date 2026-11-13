@@ -307,8 +307,12 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                               Text(context.tr('pdp.price.inclusive_tax'), style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
                               const SizedBox(height: 14),
                               Text(
-                                p.stock > 0 ? context.tr('pdp.stock.in', {'n': '${p.stock}'}) : context.tr('pdp.stock.out'),
-                                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: p.stock > 0 ? AppColors.success : AppColors.danger),
+                                p.stock <= 0
+                                    ? context.tr('pdp.stock.out')
+                                    : p.stock <= 5
+                                        ? context.tr('pdp.stock.low', {'n': '${p.stock}'})
+                                        : context.tr('pdp.stock.in', {'n': '${p.stock}'}),
+                                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: p.stock <= 0 ? AppColors.danger : p.stock <= 5 ? AppColors.orange : AppColors.success),
                               ),
                               if (p.colors.isNotEmpty) ...[
                                 const SizedBox(height: 16),

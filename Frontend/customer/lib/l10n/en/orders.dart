@@ -185,4 +185,5 @@ const Map<String, String> enOrders = {
   'orders.reorder': 'Reorder',
   'orders.reorder.added': 'Added to cart',
   'orders.reorder.unavailable': 'Some items are no longer available',
+  'pdp.stock.low': 'Only {n} left!',
 };

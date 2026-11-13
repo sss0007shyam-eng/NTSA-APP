@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/app_colors.dart';
+import '../l10n/tr.dart';
 import '../models/product.dart';
 import 'app_network_image.dart';
 import 'price_tag.dart';
@@ -70,6 +71,12 @@ class ProductCard extends StatelessWidget {
                   Text(product.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                   const SizedBox(height: 4),
                   PriceTag(pricePaise: product.pricePaise, mrpPaise: product.mrpPaise, size: 14),
+                  // Scarcity nudge: only shown when a few units are left, so a
+                  // shopper sees it is running out without it being on every card.
+                  if (product.stock > 0 && product.stock <= 5) ...[
+                    const SizedBox(height: 3),
+                    Text(context.tr('pdp.stock.low', {'n': '${product.stock}'}), style: const TextStyle(color: AppColors.danger, fontSize: 10.5, fontWeight: FontWeight.w700)),
+                  ],
                   if (product.rating != null) ...[
                     const SizedBox(height: 4),
                     RatingStars(rating: product.rating, reviewCount: product.reviewCount, size: 11),
