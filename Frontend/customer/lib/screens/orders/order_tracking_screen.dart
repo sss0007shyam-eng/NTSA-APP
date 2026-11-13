@@ -57,7 +57,14 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     'DELIVERED': 'orders.step.delivered',
   };
 
-  static const _refundKeys = {'REQUESTED': 'orders.refund.requested', 'APPROVED': 'orders.refund.approved', 'REJECTED': 'orders.refund.rejected'};
+  static const _refundKeys = {
+    'REQUESTED': 'orders.refund.requested',
+    'APPROVED': 'orders.refund.approved',
+    'PICKUP_SCHEDULED': 'orders.refund.pickup_scheduled',
+    'PICKED_UP': 'orders.refund.picked_up',
+    'COMPLETED': 'orders.refund.completed',
+    'REJECTED': 'orders.refund.rejected',
+  };
 
   /// The Backend allows a buyer to cancel only before the order is packed.
   static bool _canCancel(Order order) => order.status == 'PLACED' || order.status == 'PENDING_PAYMENT';
@@ -198,12 +205,17 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   }
 
   Future<void> _requestRefund(OrderItem item) async {
-    final reason = await showDialog<String>(context: context, builder: (_) => _RefundDialog(itemName: item.name));
-    if (reason == null || !mounted) return;
+    final result = await showDialog<Map<String, String?>>(context: context, builder: (_) => _RefundDialog(itemName: item.name));
+    if (result == null || !mounted) return;
     final requestedMsg = context.tr('orders.refund.requested');
     setState(() => _refunding.add(item.id));
     try {
-      await ApiClient.instance.post('/orders/${widget.orderId}/refunds', data: {'itemId': item.id, 'reason': reason});
+      await ApiClient.instance.post('/orders/${widget.orderId}/refunds', data: {
+        'itemId': item.id,
+        'reason': result['reason'],
+        'kind': result['kind'],
+        if ((result['note'] ?? '').isNotEmpty) 'exchangeNote': result['note'],
+      });
       _snack(requestedMsg);
       await _load();
     } catch (e) {
@@ -374,7 +386,12 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 Text('${item.name} × ${item.quantity}', style: const TextStyle(fontSize: 13.5)),
                 if (item.variantText.isNotEmpty) Text(item.variantText, style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                 if (refundLabel != null)
-                  Text(refundLabel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: item.refundStatus == 'REJECTED' ? AppColors.danger : item.refundStatus == 'APPROVED' ? AppColors.success : AppColors.orange)),
+                  Text(
+                    item.refundKind == 'EXCHANGE' ? '${context.tr('orders.refund.kind.exchange')} · $refundLabel' : refundLabel,
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: item.refundStatus == 'REJECTED' ? AppColors.danger : (item.refundStatus == 'APPROVED' || item.refundStatus == 'COMPLETED') ? AppColors.success : AppColors.orange),
+                  ),
+                if (item.refundPickupAt != null && (item.refundStatus == 'PICKUP_SCHEDULED' || item.refundStatus == 'PICKED_UP'))
+                  Text(context.tr('orders.refund.pickup_on', {'date': '${item.refundPickupAt!.day}/${item.refundPickupAt!.month}/${item.refundPickupAt!.year}'}), style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
                 // The return clock, ticking down to the moment the window shuts,
                 // so the customer sees how long is left instead of a button that
                 // vanishes without warning. Units only (d/h/m/s), no words, so it
@@ -534,37 +551,63 @@ class _RefundDialog extends StatefulWidget {
 
 class _RefundDialogState extends State<_RefundDialog> {
   final _reason = TextEditingController();
+  final _note = TextEditingController();
+  String _kind = 'RETURN';
 
   @override
   void dispose() {
     _reason.dispose();
+    _note.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final valid = _reason.text.trim().length >= 5;
+    final valid = _reason.text.trim().length >= 5 && (_kind == 'RETURN' || _note.text.trim().isNotEmpty);
     return AlertDialog(
       title: Text(context.tr('orders.refund.request')),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(widget.itemName, style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _reason,
-            autofocus: true,
-            maxLines: 3,
-            maxLength: 1000,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(labelText: context.tr('orders.refund.reason_label'), hintText: context.tr('orders.refund.reason_hint')),
-          ),
-        ],
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.itemName, style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+            const SizedBox(height: 10),
+            // Return the money, or swap it for a different size/colour.
+            SegmentedButton<String>(
+              segments: [
+                ButtonSegment(value: 'RETURN', label: Text(context.tr('orders.refund.kind.return'))),
+                ButtonSegment(value: 'EXCHANGE', label: Text(context.tr('orders.refund.kind.exchange'))),
+              ],
+              selected: {_kind},
+              onSelectionChanged: (s) => setState(() => _kind = s.first),
+              style: ButtonStyle(visualDensity: VisualDensity.compact),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _reason,
+              autofocus: true,
+              maxLines: 2,
+              maxLength: 1000,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(labelText: context.tr('orders.refund.reason_label'), hintText: context.tr('orders.refund.reason_hint')),
+            ),
+            if (_kind == 'EXCHANGE')
+              TextField(
+                controller: _note,
+                maxLength: 500,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(labelText: context.tr('orders.refund.exchange_label'), hintText: context.tr('orders.refund.exchange_hint')),
+              ),
+          ],
+        ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(context.tr('common.cancel'))),
-        TextButton(onPressed: valid ? () => Navigator.of(context).pop(_reason.text.trim()) : null, child: Text(context.tr('orders.refund.submit'))),
+        TextButton(
+          onPressed: valid ? () => Navigator.of(context).pop({'reason': _reason.text.trim(), 'kind': _kind, 'note': _note.text.trim()}) : null,
+          child: Text(context.tr('orders.refund.submit')),
+        ),
       ],
     );
   }

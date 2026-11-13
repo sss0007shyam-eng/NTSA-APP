@@ -2,7 +2,10 @@
 CREATE TYPE "OrderStatus" AS ENUM ('PENDING_PAYMENT', 'PLACED', 'PACKED', 'SHIPPED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED');
 
 -- CreateEnum
-CREATE TYPE "RefundStatus" AS ENUM ('REQUESTED', 'APPROVED', 'REJECTED');
+CREATE TYPE "RefundStatus" AS ENUM ('REQUESTED', 'APPROVED', 'PICKUP_SCHEDULED', 'PICKED_UP', 'COMPLETED', 'REJECTED');
+
+-- CreateEnum
+CREATE TYPE "RefundKind" AS ENUM ('RETURN', 'EXCHANGE');
 
 -- CreateEnum
 CREATE TYPE "DiscountType" AS ENUM ('PERCENT', 'FLAT');
@@ -443,7 +446,10 @@ CREATE TABLE "refunds" (
     "id" TEXT NOT NULL,
     "orderItemId" TEXT NOT NULL,
     "reason" TEXT NOT NULL,
+    "kind" "RefundKind" NOT NULL DEFAULT 'RETURN',
+    "exchangeNote" TEXT,
     "status" "RefundStatus" NOT NULL DEFAULT 'REQUESTED',
+    "pickupAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "reviewedAt" TIMESTAMP(3),
 

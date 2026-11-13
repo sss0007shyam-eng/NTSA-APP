@@ -606,4 +606,12 @@ const Map<String, String> strings = {
   'orders.reorder.added': 'Added to cart',
   'orders.reorder.unavailable': 'Some items are no longer available',
   'pdp.stock.low': 'Only {n} left!',
+  'orders.refund.kind.return': 'Return for refund',
+  'orders.refund.kind.exchange': 'Exchange for a different size/colour',
+  'orders.refund.exchange_label': 'What would you like instead?',
+  'orders.refund.exchange_hint': 'e.g. size L, or blue',
+  'orders.refund.pickup_scheduled': 'Pickup scheduled',
+  'orders.refund.picked_up': 'Picked up',
+  'orders.refund.completed': 'Return completed',
+  'orders.refund.pickup_on': 'Pickup on {date}',
 };

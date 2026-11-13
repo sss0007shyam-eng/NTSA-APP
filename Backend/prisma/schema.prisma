@@ -17,7 +17,14 @@ enum OrderStatus {
 enum RefundStatus {
   REQUESTED
   APPROVED
+  PICKUP_SCHEDULED
+  PICKED_UP
+  COMPLETED
   REJECTED
+}
+enum RefundKind {
+  RETURN
+  EXCHANGE
 }
 enum DiscountType {
   PERCENT
@@ -627,7 +634,13 @@ model Refund {
   id String @id @default(cuid())
   orderItemId String @unique
   reason String
+  // RETURN gives the money back; EXCHANGE sends a replacement instead. What the
+  // customer wants in an exchange (a different size/colour) is in exchangeNote.
+  kind RefundKind @default(RETURN)
+  exchangeNote String?
   status RefundStatus @default(REQUESTED)
+  // When the courier is booked to collect the item from the customer.
+  pickupAt DateTime?
   createdAt DateTime @default(now())
   reviewedAt DateTime?
   orderItem OrderItem @relation(fields: [orderItemId], references: [id])

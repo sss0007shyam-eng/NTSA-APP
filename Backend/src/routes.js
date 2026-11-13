@@ -389,11 +389,15 @@ router.post('/orders/:id/cancel', buyer, async (req, res) => {
   res.json(order);
 });
 router.post('/orders/:id/refunds', customer, async (req, res) => {
-  const { itemId, reason } = z.object({ itemId: z.string(), reason: z.string().trim().min(5).max(1000) }).parse(req.body);
+  const { itemId, reason, kind, exchangeNote } = z.object({
+    itemId: z.string(), reason: z.string().trim().min(5).max(1000),
+    kind: z.enum(['RETURN', 'EXCHANGE']).default('RETURN'),
+    exchangeNote: z.string().trim().max(500).optional(),
+  }).parse(req.body);
   const order = await ownedOrder(req.actor, req.params.id);
   const line = order.items.find(i => i.id === itemId);
   requireThat(line, 404, 'Order item not found');
-  const refund = await requestRefund(req.actor, itemId, reason);
+  const refund = await requestRefund(req.actor, itemId, reason, kind, exchangeNote);
   // The shop whose item is coming back hears it straight away, the same way
   // the courier's own bad news reaches them (SELLER_ALERT in services/
   // shipping.js) -- a return is theirs to answer for, and learning of it as a
@@ -1396,8 +1400,11 @@ router.delete('/admin/sellers/:id/penalties/:penaltyId', async (req, res) => {
 });
 router.get('/admin/refunds', async (req, res) => res.json(await db.refund.findMany({ include: { orderItem: { include: { order: true } } }, orderBy: { createdAt: 'desc' }, take: 200 })));
 router.patch('/admin/refunds/:id', async (req, res) => {
-  const { status } = z.object({ status: z.enum(['APPROVED', 'REJECTED']) }).parse(req.body);
-  res.json(await reviewRefund(req.params.id, status));
+  const { status, pickupAt } = z.object({
+    status: z.enum(['APPROVED', 'REJECTED', 'PICKUP_SCHEDULED', 'PICKED_UP', 'COMPLETED']),
+    pickupAt: z.coerce.date().optional(),
+  }).parse(req.body);
+  res.json(await reviewRefund(req.params.id, status, pickupAt));
 });
 
 // ---- The seller panel (its own site; see Frontend/seller) ----

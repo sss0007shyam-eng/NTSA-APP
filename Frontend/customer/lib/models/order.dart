@@ -1,5 +1,5 @@
 class OrderItem {
-  OrderItem({this.id = '', this.productId, required this.name, required this.quantity, required this.unitPaise, this.refundEligible = false, this.refundExpiresAt, this.refundWindowHours = 0, this.refundStatus, this.size, this.color, this.grade});
+  OrderItem({this.id = '', this.productId, required this.name, required this.quantity, required this.unitPaise, this.refundEligible = false, this.refundExpiresAt, this.refundWindowHours = 0, this.refundStatus, this.refundKind, this.refundPickupAt, this.size, this.color, this.grade});
 
   final String id;
   /// The product this line was bought from; lets "Buy again" re-add it. May be
@@ -20,6 +20,9 @@ class OrderItem {
   final int refundWindowHours;
   /// REQUESTED / APPROVED / REJECTED once a refund has been requested.
   final String? refundStatus;
+  /// RETURN or EXCHANGE, and when the courier is booked to collect the item.
+  final String? refundKind;
+  final DateTime? refundPickupAt;
 
   factory OrderItem.fromJson(Map<String, dynamic> json) => OrderItem(
         id: json['id']?.toString() ?? '',
@@ -31,6 +34,8 @@ class OrderItem {
         refundExpiresAt: json['refundExpiresAt'] != null ? DateTime.tryParse(json['refundExpiresAt'] as String)?.toLocal() : null,
         refundWindowHours: (json['refundWindowHours'] as num?)?.toInt() ?? 0,
         refundStatus: (json['refund'] as Map?)?['status'] as String?,
+        refundKind: (json['refund'] as Map?)?['kind'] as String?,
+        refundPickupAt: (json['refund'] as Map?)?['pickupAt'] != null ? DateTime.tryParse((json['refund'] as Map)['pickupAt'] as String)?.toLocal() : null,
         size: json['size'] as String?,
         color: json['color'] as String?,
         grade: json['grade'] as String?,

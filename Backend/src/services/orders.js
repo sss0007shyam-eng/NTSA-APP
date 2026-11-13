@@ -232,12 +232,12 @@ export async function deliver(id, otp) {
   await notifyOrder(result.userId && await db.user.findUnique({ where: { id: result.userId } }), result);
   return publicOrder(result);
 }
-export async function requestRefund(actor, itemId, reason) {
+export async function requestRefund(actor, itemId, reason, kind = 'RETURN', exchangeNote = null) {
   return atomic(async tx => {
     const item = await tx.orderItem.findUnique({ where: { id: itemId }, include: { order: true, refund: true } });
     requireThat(item?.order.userId === actor.id, 404, 'Order item not found');
     requireThat(eligible(item, item.order), 400, 'Refund window has expired or a request already exists');
-    const refund = await tx.refund.create({ data: { orderItemId: itemId, reason } });
+    const refund = await tx.refund.create({ data: { orderItemId: itemId, reason, kind, exchangeNote: exchangeNote || null } });
     await tx.orderItem.update({ where: { id: itemId }, data: { refundEligible: false } });
     await syncEligibility(tx, item.orderId);
     return refund;
@@ -247,12 +247,24 @@ export async function syncEligibility(tx, orderId) {
   const count = await tx.orderItem.count({ where: { orderId, refundEligible: true, refundExpiresAt: { gt: new Date() }, refund: null } });
   await tx.order.update({ where: { id: orderId }, data: { refundEligible: count > 0 } });
 }
-export async function reviewRefund(id, status) {
+// The return's life after it is raised. REJECTED ends it; otherwise it is
+// approved, the courier collects it (pickup scheduled -> picked up) and it is
+// finished (money already in the wallet for a RETURN, replacement sent for an
+// EXCHANGE). Only these forward steps are allowed.
+const REFUND_NEXT = {
+  REQUESTED: ['APPROVED', 'REJECTED'],
+  APPROVED: ['PICKUP_SCHEDULED'],
+  PICKUP_SCHEDULED: ['PICKED_UP'],
+  PICKED_UP: ['COMPLETED'],
+};
+export async function reviewRefund(id, status, pickupAt) {
   return atomic(async tx => {
     const refund = await tx.refund.findUnique({ where: { id }, include: { orderItem: { include: { order: true } } } });
     requireThat(refund, 404, 'Refund not found');
-    requireThat(refund.status === 'REQUESTED', 409, 'Refund already reviewed');
-    if (status === 'APPROVED') {
+    requireThat((REFUND_NEXT[refund.status] || []).includes(status), 409, 'That is not a valid next step for this return');
+    // A RETURN gives the money back the moment it is approved; an EXCHANGE sends
+    // a replacement instead, so no wallet credit.
+    if (status === 'APPROVED' && refund.kind === 'RETURN') {
       const item = refund.orderItem;
       const wallet = await tx.wallet.findUnique({ where: { userId: item.order.userId } });
       const amountPaise = item.quantity * item.unitPaise;
@@ -260,7 +272,10 @@ export async function reviewRefund(id, status) {
       await tx.wallet.update({ where: { id: wallet.id }, data: { balancePaise: { increment: amountPaise } } });
       await tx.walletTransaction.create({ data: { walletId: wallet.id, amountPaise, kind: 'REFUND', reference: `refund:${id}` } });
     }
-    return tx.refund.update({ where: { id }, data: { status, reviewedAt: new Date() } });
+    const data = { status };
+    if (status === 'APPROVED' || status === 'REJECTED') data.reviewedAt = new Date();
+    if (status === 'PICKUP_SCHEDULED') data.pickupAt = pickupAt ?? null;
+    return tx.refund.update({ where: { id }, data });
   });
 }
 export async function expireJobs(now = new Date()) {
