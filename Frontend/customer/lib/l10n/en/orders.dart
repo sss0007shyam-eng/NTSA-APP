@@ -182,4 +182,7 @@ const Map<String, String> enOrders = {
   'orders.month.oct': 'Oct',
   'orders.month.nov': 'Nov',
   'orders.month.dec': 'Dec',
+  'orders.reorder': 'Reorder',
+  'orders.reorder.added': 'Added to cart',
+  'orders.reorder.unavailable': 'Some items are no longer available',
 };

@@ -602,4 +602,7 @@ const Map<String, String> strings = {
   'sup.chat.support': 'NTSA సపోర్ట్',
   'sup.chat.resolved_note': 'ఈ రిక్వెస్ట్ పరిష్కారమైంది. ఇంకా సహాయం కావాలంటే మెసేజ్ పంపండి.',
   'sup.chat.order': 'ఆర్డర్ {id}',
+  'orders.reorder': 'Reorder',
+  'orders.reorder.added': 'Added to cart',
+  'orders.reorder.unavailable': 'Some items are no longer available',
 };

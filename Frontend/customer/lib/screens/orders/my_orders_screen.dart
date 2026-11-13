@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/app_colors.dart';
 import '../../l10n/tr.dart';
 import '../../models/order.dart';
+import '../../providers/cart_provider.dart';
 import '../../widgets/price_tag.dart';
+import '../cart/cart_screen.dart';
 import 'order_tracking_screen.dart';
 
 class MyOrdersScreen extends StatefulWidget {
@@ -31,6 +34,35 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
+  }
+
+  // Orders whose "Reorder" is in flight, so the button shows a spinner and
+  // can't be tapped twice.
+  final Set<String> _reordering = {};
+
+  // Put every still-available item from a past order back in the cart, then
+  // open the cart. An item that is gone or out of stock is skipped, not fatal.
+  Future<void> _reorder(Order order) async {
+    setState(() => _reordering.add(order.id));
+    final cart = context.read<CartProvider>();
+    var added = 0;
+    for (final item in order.items) {
+      final id = item.productId;
+      if (id == null || id.isEmpty) continue;
+      String? norm(String? v) => (v == null || v.isEmpty) ? null : v;
+      try {
+        await cart.add(id, size: norm(item.size), color: norm(item.color), grade: norm(item.grade), quantity: item.quantity);
+        added++;
+      } catch (_) {/* gone or out of stock -- skip it */}
+    }
+    if (!mounted) return;
+    setState(() => _reordering.remove(order.id));
+    if (added == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('orders.reorder.unavailable'))));
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('orders.reorder.added'))));
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CartScreen()));
   }
 
   @override
@@ -86,7 +118,21 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                                 ]),
                               ],
                               const SizedBox(height: 6),
-                              PriceTag(pricePaise: order.totalPaise, size: 14),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  PriceTag(pricePaise: order.totalPaise, size: 14),
+                                  TextButton.icon(
+                                    onPressed: _reordering.contains(order.id) ? null : () => _reorder(order),
+                                    icon: _reordering.contains(order.id)
+                                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                                        : const Icon(Icons.refresh_rounded, size: 17),
+                                    label: Text(context.tr('orders.reorder')),
+                                    style: TextButton.styleFrom(foregroundColor: AppColors.orange, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), minimumSize: Size.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                                  ),
+                                ],
+                              ),
                             ],
                           ),
                         ),

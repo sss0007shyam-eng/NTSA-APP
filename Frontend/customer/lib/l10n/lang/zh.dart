@@ -602,4 +602,7 @@ const Map<String, String> strings = {
   'sup.chat.support': 'NTSA 客服',
   'sup.chat.resolved_note': '该问题已解决。如果还需要帮助，请给我们留言。',
   'sup.chat.order': '订单 {id}',
+  'orders.reorder': 'Reorder',
+  'orders.reorder.added': 'Added to cart',
+  'orders.reorder.unavailable': 'Some items are no longer available',
 };
