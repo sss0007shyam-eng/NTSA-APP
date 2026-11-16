@@ -375,10 +375,11 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                                 Wrap(
                                   spacing: 8,
                                   runSpacing: 8,
+                                  // Just the grade name, like Cashify: the price above
+                                  // changes to the picked grade's price instead.
                                   children: p.conditionGrades.map((g) {
-                                    final extra = p.conditionGradeExtraPaise[g] ?? 0;
                                     return ChoiceChip(
-                                      label: Text(extra > 0 ? '$g  (+${formatPaise(extra)})' : g),
+                                      label: Text(g),
                                       selected: _selectedGrade == g,
                                       side: _missingGrade ? const BorderSide(color: AppColors.danger) : null,
                                       onSelected: (_) => setState(() {
