@@ -13,7 +13,6 @@ google-services.json
 GoogleService-Info.plist
 .idea/
 Backend/uploads/
-.claude/
 .gradle/
 *.jks
 *.keystore
