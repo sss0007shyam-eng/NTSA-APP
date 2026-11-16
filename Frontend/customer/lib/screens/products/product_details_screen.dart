@@ -322,7 +322,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                                 Wrap(
                                   spacing: 8,
                                   children: p.colors.map((c) => ChoiceChip(
-                                        label: Text(p.extraFor(c) > 0 ? '$c  (+${formatPaise(p.extraFor(c))})' : c),
+                                        label: Text(c),
                                         selected: _selectedColor == c,
                                         onSelected: (_) => setState(() {
                                           _selectedColor = c;
@@ -346,10 +346,11 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                                 Wrap(
                                   spacing: 8,
                                   runSpacing: 8,
+                                  // Option names only, like the condition chips: the price
+                                  // above follows whatever is picked.
                                   children: p.sizes.map((s) {
-                                    final extra = p.sizePrices[s] != null ? p.priceFor(s) - p.pricePaise : 0;
                                     return ChoiceChip(
-                                      label: Text(extra > 0 ? '$s  (+${formatPaise(extra)})' : s),
+                                      label: Text(s),
                                       selected: _selectedSize == s,
                                       side: _missingSize ? const BorderSide(color: AppColors.danger) : null,
                                       onSelected: (_) => setState(() {

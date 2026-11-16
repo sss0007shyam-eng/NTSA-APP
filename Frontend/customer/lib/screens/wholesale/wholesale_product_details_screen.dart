@@ -124,15 +124,9 @@ class _WholesaleProductDetailsScreenState extends State<WholesaleProductDetailsS
                   Text(context.tr('ws.product.units_in_stock', {'n': '${product.stock}'}), style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary)),
                   const SizedBox(height: 18),
                   if (product.colors.isNotEmpty)
-                    _chips(context.tr('ws.product.color'), product.colors, _color, (c) => _color = c, label: (c) {
-                      final extra = product.extraFor(c);
-                      return extra > 0 ? '$c  (+${formatPaise(extra)})' : c;
-                    }),
+                    _chips(context.tr('ws.product.color'), product.colors, _color, (c) => _color = c),
                   if (product.sizes.isNotEmpty)
-                    _chips(product.sizeLabel, product.sizes, _size, (s) => _size = s, label: (s) {
-                      final extra = product.sizePrices[s] != null ? product.wholesaleFor(s) - product.wholesaleFor(null) : 0;
-                      return extra > 0 ? '$s  (+${formatPaise(extra)})' : s;
-                    }),
+                    _chips(product.sizeLabel, product.sizes, _size, (s) => _size = s),
                   if (otherLines.isNotEmpty) ...[
                     Text(context.tr('ws.product.already_in_order'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textPrimary)),
                     const SizedBox(height: 6),
