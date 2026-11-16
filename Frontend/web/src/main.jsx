@@ -185,6 +185,9 @@ function App() {
     } else if (role === 'ADMIN') {
       const [o, notes, queue, r, apps, rep, late] = await Promise.all([api('/orders'), api('/notifications'), api('/packing/orders'), api('/admin/refunds'), api('/admin/seller-applications'), api(`/admin/reports?days=${reportsDays}`), api('/admin/late-orders')]);
       setOrders(o); setNotifications(notes); setToPack(queue); setRefunds(r); setApplications(apps); setReports(rep); setLateOrders(late);
+      // A seller's new listing or support ticket shows up without a reload.
+      const [p, tks] = await Promise.all([api('/admin/products?audience=RETAIL'), api('/support/tickets')]);
+      setProducts(p); setTickets(tks);
     } else if (role) {
       setOrders(await api('/orders'));
     }

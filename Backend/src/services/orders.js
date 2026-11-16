@@ -15,7 +15,7 @@ import { trackingLinkFor } from '../lib/courier.js';
 // The courier partner comes along so the Track link can be built from its
 // template on the way out, rather than being frozen onto the order when the
 // shipment was booked.
-export const orderInclude = { items: { include: { refund: true, seller: { select: { shopName: true } }, product: { select: { images: true, hsn: true, attributes: true } } } }, events: { orderBy: { occurredAt: 'asc' } }, courierPartner: { select: { id: true, name: true, trackingUrlTemplate: true, contactPhone: true, contactEmail: true } } };
+export const orderInclude = { items: { orderBy: { id: 'asc' }, include: { refund: true, seller: { select: { shopName: true } }, product: { select: { images: true, hsn: true, attributes: true } } } }, events: { orderBy: { occurredAt: 'asc' } }, courierPartner: { select: { id: true, name: true, trackingUrlTemplate: true, contactPhone: true, contactEmail: true } } };
 export const ownerWhere = actor => actor.role === 'ADMIN' ? {} : actor.role === 'CUSTOMER' ? { userId: actor.id } : { vendorId: actor.id };
 export function publicOrder(order) {
   const { deliveryOtpHash, deliveryOtpExpiresAt, deliveryOtpAttempts, courierPartner, ...safe } = order;
