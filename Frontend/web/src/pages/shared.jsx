@@ -21,7 +21,7 @@ export function OrderTable({ orders, onOpen }) {
   return orders.length ? <div className="table-scroll"><table>
     <thead><tr><th>Order</th><th>Customer</th><th>Seller</th><th>Date</th><th>Amount</th><th>Status</th><th/></tr></thead>
     <tbody>{orders.map(o => <tr key={o.id}>
-      <td><div className="product-cell">{o.items[0]?.image ? <img className="product-image" src={o.items[0].image} alt=""/> : <div className="product-image placeholder"><Package size={16}/></div>}<div><strong>#{o.id.slice(-8).toUpperCase()}</strong><small>{o.vendorId ? 'Wholesale' : 'Customer'} · {o.items.length} item(s)</small></div></div></td>
+      <td><div className="product-cell">{o.items[0]?.image ? <img className="product-image" src={o.items[0].image} alt=""/> : <div className="product-image placeholder"><Package size={16}/></div>}<div><strong>#{o.id.slice(0, 10).toUpperCase()}</strong><small>{o.vendorId ? 'Wholesale' : 'Customer'} · {o.items.length} item(s)</small></div></div></td>
       <td>{o.address?.name || <span className="muted">—</span>}</td>
       <td><small>{sellerSummary(o.items)}</small></td>
       <td>{new Date(o.createdAt).toLocaleDateString('en-IN')}</td>

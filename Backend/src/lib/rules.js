@@ -18,6 +18,17 @@ export function eligible(item, order, now = new Date()) {
     new Date(item.refundExpiresAt) > now && !item.refund;
 }
 export function deadline(deliveredAt, hours) { return new Date(deliveredAt.getTime() + hours * 3600000); }
+// A line whose money went back to the customer: a RETURN that was approved
+// (the wallet is credited at approval) and is anywhere past that point. An
+// EXCHANGE keeps the sale -- a replacement goes out, no money comes back.
+const MONEY_BACK = new Set(['APPROVED', 'PICKUP_SCHEDULED', 'PICKED_UP', 'COMPLETED']);
+export function moneyReturned(item) {
+  return item.refund?.kind === 'RETURN' && MONEY_BACK.has(item.refund.status);
+}
+// Any return or exchange the admin accepted (not still waiting, not rejected).
+export function refundAccepted(item) {
+  return !!item.refund && MONEY_BACK.has(item.refund.status);
+}
 const DAY = 86400000;
 // How many extra days a seller's holiday adds to a delivery promise: the days
 // left until their holiday is meant to end, never negative, 0 if not away.

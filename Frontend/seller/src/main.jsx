@@ -179,7 +179,7 @@ function App() {
               <div className="hero-art" aria-hidden="true"><div className="orbit"/><div className="parcel parcel-back"/><div className="parcel parcel-front"><Store size={52} strokeWidth={1.2}/></div><div className="art-tag"><Check size={15}/>Selling on NTSA</div><span className="sparkle">✦</span></div>
             </section>
             <div className="stats">
-              <Stat icon={Wallet} label="Earned" value={money(summary?.earnedPaise)} note={summary?.penaltyPaise ? `After NTSA's commission and ${money(summary.penaltyPaise)} in penalties` : "After NTSA's commission, from delivered orders"}/>
+              <Stat icon={Wallet} label="Earned" value={money(summary?.earnedPaise)} note={`${summary?.penaltyPaise ? `After NTSA's commission and ${money(summary.penaltyPaise)} in penalties` : "After NTSA's commission, from delivered orders"}${summary?.returnedPaise ? ` · ${money(summary.returnedPaise)} returned to customers, not counted` : ''}`}/>
               <Stat icon={Percent} label="Commission paid" value={money(summary?.commissionPaise)} note={`NTSA's ${summary?.commissionPercent ?? 0}% on delivered orders`}/>
               <Stat icon={Truck} label="On the way" value={money(summary?.awaitingPaise)} note="Ordered, not yet delivered"/>
               <Stat icon={ShoppingBag} label="Pieces sold" value={summary?.piecesSold ?? 0} note={`Across ${summary?.orders ?? 0} order(s)`}/>
@@ -278,7 +278,7 @@ function App() {
               <thead><tr><th>Item</th><th>Order</th><th>Customer</th><th>Qty</th><th>Action</th></tr></thead>
               <tbody>{toPack.map(o => <tr key={o.id}>
                 <td><div className="product-cell">{o.image ? <img className="product-image" src={o.image} alt=""/> : <div className="product-image placeholder"><Package/></div>}<div><strong>{o.name}</strong>{(o.size || o.color) && <small>{[o.size, o.color].filter(Boolean).join(' · ')}</small>}</div></div></td>
-                <td><strong>#{o.orderId.slice(-8).toUpperCase()}</strong><small>{new Date(o.placedAt).toLocaleDateString('en-IN')}</small></td>
+                <td><strong>#{o.orderId.slice(0, 10).toUpperCase()}</strong><small>{new Date(o.placedAt).toLocaleDateString('en-IN')}</small></td>
                 <td>{o.buyerName ? <><strong>{o.buyerName}</strong>{o.address && <small>{o.address.phone}<br/>{o.address.line1}, {o.address.city}, {o.address.state} {o.address.postalCode}</small>}</> : <span className="muted">—</span>}</td>
                 <td>{o.quantity}</td>
                 <td><Button disabled={busy} onClick={() => action(() => api(`/seller/orders/${o.id}/pack`, { method: 'POST' }), 'Marked packed')}><Check size={16}/>Mark packed</Button></td>
@@ -322,7 +322,7 @@ function App() {
         <div style={{ display: 'flex', gap: 10 }}><Button secondary type="button" onClick={() => setHolidayOpen(false)}>Cancel</Button><Button disabled={busy}>Start holiday</Button></div>
       </form>
     </Modal>}
-    {orderView && <Modal title={`Order #${orderView.orderId.slice(-8).toUpperCase()}`} close={() => setOrderView(null)}>
+    {orderView && <Modal title={`Order #${orderView.orderId.slice(0, 10).toUpperCase()}`} close={() => setOrderView(null)}>
       <SellerOrderDetail order={orders.find(o => o.id === orderView.id) || orderView} onSupport={() => { setOrderView(null); go('Support'); }}/>
     </Modal>}
   </div>;
@@ -517,7 +517,7 @@ function SellerReturnsPage({ refunds, pending, onRefresh }) {
       <thead><tr><th>Item</th><th>Order</th><th>Customer</th><th>Why it is coming back</th><th>Refund amount</th><th>Status</th></tr></thead>
       <tbody>{shown.map(r => <tr key={r.id}>
         <td><div className="product-cell">{r.image ? <img className="product-image" src={r.image} alt=""/> : <div className="product-image placeholder"><Package/></div>}<div><strong>{r.name}</strong>{(r.size || r.color || r.grade) && <small>{[r.size, r.color, r.grade].filter(Boolean).join(' · ')}</small>}<small>{r.quantity} pc</small></div></div></td>
-        <td><strong>#{r.orderId.slice(-8).toUpperCase()}</strong><small>Ordered {day(r.placedAt)}</small>{r.deliveredAt && <small>Delivered {day(r.deliveredAt)}</small>}</td>
+        <td><strong>#{r.orderId.slice(0, 10).toUpperCase()}</strong><small>Ordered {day(r.placedAt)}</small>{r.deliveredAt && <small>Delivered {day(r.deliveredAt)}</small>}</td>
         <td>{r.buyerName ? <strong>{r.buyerName}</strong> : <span className="muted">—</span>}<small>{r.buyer}</small></td>
         <td>{r.reason}</td>
         <td>{money(r.amountPaise)}</td>
@@ -531,7 +531,7 @@ function OrderTable({ orders, full, onCancel, onOpen }) {
     <thead><tr><th>Item</th><th>Order</th>{full && <th>Customer</th>}<th>Qty</th><th>Order value</th>{full && <th>You earn</th>}<th>Status</th>{full && <th>Actions</th>}</tr></thead>
     <tbody>{orders.map(o => <tr key={o.id} className={onOpen ? 'row-clickable' : ''} onClick={onOpen ? () => onOpen(o) : undefined}>
       <td><div className="product-cell">{o.image ? <img className="product-image" src={o.image} alt=""/> : <div className="product-image placeholder"><Package/></div>}<div><strong>{o.name}</strong>{(o.size || o.color) && <small>{[o.size, o.color].filter(Boolean).join(' · ')}</small>}</div></div></td>
-      <td><strong>#{o.orderId.slice(-8).toUpperCase()}</strong><small>{full ? new Date(o.placedAt).toLocaleDateString('en-IN') : `${o.buyerName || o.buyer} · ${new Date(o.placedAt).toLocaleDateString('en-IN')}`}</small></td>
+      <td><strong>#{o.orderId.slice(0, 10).toUpperCase()}</strong><small>{full ? new Date(o.placedAt).toLocaleDateString('en-IN') : `${o.buyerName || o.buyer} · ${new Date(o.placedAt).toLocaleDateString('en-IN')}`}</small></td>
       {full && <td>{o.buyerName ? <><strong>{o.buyerName}</strong>{o.address && <small>{o.address.phone}<br/>{o.address.line1}, {o.address.city}, {o.address.state} {o.address.postalCode}</small>}</> : <span className="muted">—</span>}</td>}
       <td>{o.quantity}</td>
       <td>{money(o.grossPaise ?? o.unitPaise * o.quantity)}{full && <small>{money(o.unitPaise)} each</small>}</td>
@@ -570,7 +570,7 @@ function CourierJourney({ order }) {
 }
 function SellerOrderDetail({ order, onSupport }) {
   return <div className="editor">
-    <div className="product-cell" style={{ marginBottom: 14 }}>{order.image ? <img className="product-image" src={order.image} alt=""/> : <div className="product-image placeholder"><Package/></div>}<div><strong>{order.name}</strong>{(order.size || order.color || order.grade) && <small>{[order.size, order.color, order.grade].filter(Boolean).join(' · ')}</small>}<small>Order #{order.orderId.slice(-8).toUpperCase()} · {order.quantity} pc</small></div></div>
+    <div className="product-cell" style={{ marginBottom: 14 }}>{order.image ? <img className="product-image" src={order.image} alt=""/> : <div className="product-image placeholder"><Package/></div>}<div><strong>{order.name}</strong>{(order.size || order.color || order.grade) && <small>{[order.size, order.color, order.grade].filter(Boolean).join(' · ')}</small>}<small>Order #{order.orderId.slice(0, 10).toUpperCase()} · {order.quantity} pc</small></div></div>
     {(order.deliveryPartner || order.expectedDeliveryAt) && order.status !== 'CANCELLED' && <p className="muted" style={{ marginTop: 0 }}>{order.deliveryPartner && <>Delivery partner: <strong>{order.deliveryPartner}</strong></>}{order.deliveryPartner && order.expectedDeliveryAt && ' · '}{order.expectedDeliveryAt && order.status !== 'DELIVERED' && <>Expected by <strong>{new Date(order.expectedDeliveryAt).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</strong></>}</p>}
     {order.openIssues?.length > 0 && <div className="issue-box">
       <strong><AlertTriangle size={14} style={{ verticalAlign: -2 }}/> Customer reported a problem: {order.openIssues.map(i => ISSUE_LABEL[i.kind] || i.kind).join(', ')}</strong>

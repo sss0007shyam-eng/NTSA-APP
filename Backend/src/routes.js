@@ -7,7 +7,7 @@ import { Prisma } from '@prisma/client';
 import { db, atomic } from './db.js';
 import { config } from './config.js';
 import { z, productSchema, addressSchema, vendorCreateSchema, vendorUpdateSchema, vendorPasswordSchema, vendorMessageSchema, bannerSchema, reviewSchema, adminReviewSchema, couponSchema, staffCreateSchema, staffUpdateSchema, sellerApplicationSchema, sellerApproveSchema, sellerUpdateSchema, sellerDeviceLoginSchema, sellerOtpSchema, blockedPincodeSchema, deliveryRuleSchema, courierPartnerSchema, courierPartnerUpdateSchema, settingsSchema, invoiceExtrasSchema, panelPagesSchema, blockedAreaSchema, shopQuerySchema, gstNumberSchema, verificationKindSchema } from './lib/validation.js';
-import { requireThat, holidayGraceCutoff, HttpError } from './lib/rules.js';
+import { requireThat, holidayGraceCutoff, HttpError, moneyReturned, refundAccepted } from './lib/rules.js';
 import { rankByImage, visualSearchEnabled } from './services/visualSearch.js';
 import { interpretQuery, searchTerms, describeQuery, pickResults } from './lib/shopQuery.js';
 import { variantFor, priceFor, publicSizePrices } from './lib/variants.js';
@@ -715,7 +715,7 @@ router.get('/admin/seller-insights', async (req, res) => {
   const [sellers, products, items] = await Promise.all([
     db.seller.findMany({ where: { deleted: false }, orderBy: { createdAt: 'desc' } }),
     db.product.findMany({ where: { sellerId: { not: null }, active: true }, select: { id: true, name: true, images: true, stock: true, pricePaise: true, sellerId: true } }),
-    db.orderItem.findMany({ where: { sellerId: { not: null } }, select: { sellerId: true, productId: true, orderId: true, name: true, quantity: true, unitPaise: true, order: { select: { status: true } }, refund: { select: { status: true } } } }),
+    db.orderItem.findMany({ where: { sellerId: { not: null } }, select: { sellerId: true, productId: true, orderId: true, name: true, quantity: true, unitPaise: true, order: { select: { status: true } }, refund: { select: { status: true, kind: true } } } }),
   ]);
   // Start every active product at zero so a listing with no sales still shows.
   const prodMap = new Map();
@@ -724,7 +724,7 @@ router.get('/admin/seller-insights', async (req, res) => {
     if (!prodMap.has(it.productId)) prodMap.set(it.productId, { productId: it.productId, sellerId: it.sellerId, name: it.name, image: null, stock: null, timesOrdered: 0, units: 0, revenuePaise: 0, refunds: 0, active: false });
     const row = prodMap.get(it.productId);
     const cancelled = it.order.status === 'CANCELLED';
-    if (!cancelled) { row.timesOrdered += 1; row.units += it.quantity; row.revenuePaise += it.quantity * it.unitPaise; }
+    if (!cancelled) { row.timesOrdered += 1; row.units += it.quantity; if (!moneyReturned(it)) row.revenuePaise += it.quantity * it.unitPaise; }
     if (it.refund) row.refunds += 1;
   }
   const byProduct = [...prodMap.values()];
@@ -737,9 +737,9 @@ router.get('/admin/seller-insights', async (req, res) => {
       orders: new Set(live.map(i => i.orderId)).size,
       orderLines: live.length,
       unitsSold: live.reduce((n, i) => n + i.quantity, 0),
-      revenuePaise: live.reduce((n, i) => n + i.quantity * i.unitPaise, 0),
+      revenuePaise: live.filter(i => !moneyReturned(i)).reduce((n, i) => n + i.quantity * i.unitPaise, 0),
       refunds: items.filter(i => i.sellerId === s.id && i.refund).length,
-      refundsApproved: items.filter(i => i.sellerId === s.id && i.refund?.status === 'APPROVED').length,
+      refundsApproved: items.filter(i => i.sellerId === s.id && refundAccepted(i)).length,
       products: prods,
     };
   });
@@ -995,6 +995,16 @@ router.post('/support/orders/:id/events', support, async (req, res) => {
   }).parse(req.body);
   requireThat(status !== 'DELIVERED' || req.actor.role === 'ADMIN', 403, 'Only the admin can mark an order delivered by hand');
   requireThat(status !== 'UPDATE' || note, 400, 'Add a note describing the update');
+  // A courier's webhook may arrive out of order and is kept (and flagged); a
+  // step typed in by hand must not put "Delivered" on an order nobody packed,
+  // because the customer sees the journey as the truth.
+  if (status !== 'UPDATE') {
+    const current = await db.order.findUnique({ where: { id: req.params.id }, select: { status: true } });
+    requireThat(current, 404, 'Order not found');
+    requireThat(current.status !== 'CANCELLED', 400, 'This order was cancelled; only a note can be added');
+    requireThat(!['PENDING_PAYMENT', 'PLACED'].includes(current.status), 400, 'This order is not packed yet. Mark it packed first, then add delivery steps');
+    requireThat(!(status === 'DELIVERED' && current.status === 'DELIVERED'), 400, 'This order is already delivered');
+  }
   await recordShipmentEvent({ orderId: req.params.id, status, title: status === 'UPDATE' ? note : undefined, note: status === 'UPDATE' ? undefined : note, location, source: req.actor.role === 'ADMIN' ? 'ADMIN' : 'SUPPORT', actorName: req.actor.account.name });
   res.json(publicOrder(await ownedOrder({ role: 'ADMIN' }, req.params.id)));
 });
@@ -1552,11 +1562,13 @@ router.get('/seller/refunds', seller, async (req, res) => {
 // counted as earned once the order is delivered. `earnedPaise` is net, after
 // NTSA's commission -- `commissionPaise` is the other half of that split.
 async function sellerSummaryFor(sellerId, commissionPercent, penaltyPaise = 0) {
-  const items = await db.orderItem.findMany({ where: { sellerId }, include: { order: { select: { status: true, cancelledBy: true } }, refund: { select: { status: true } } } });
+  const items = await db.orderItem.findMany({ where: { sellerId }, include: { order: { select: { status: true, cancelledBy: true } }, refund: { select: { status: true, kind: true } } } });
   const live = items.filter(i => i.order.status !== 'CANCELLED');
   const value = rows => rows.reduce((sum, i) => sum + i.unitPaise * i.quantity, 0);
   const delivered = live.filter(i => i.order.status === 'DELIVERED');
-  const deliveredGrossPaise = value(delivered);
+  // A returned line's money went back to the customer, so it is not the
+  // shop's to earn and NTSA takes no commission on it.
+  const deliveredGrossPaise = value(delivered.filter(i => !moneyReturned(i)));
   const commissionPaise = Math.round(deliveredGrossPaise * commissionPercent / 100);
   // Performance signals, the same ones a real marketplace grades a seller on.
   const totalOrders = new Set(items.map(i => i.orderId)).size;
@@ -1575,6 +1587,7 @@ async function sellerSummaryFor(sellerId, commissionPercent, penaltyPaise = 0) {
     deliveredGrossPaise,
     earnedPaise: deliveredGrossPaise - commissionPaise - penaltyPaise,
     penaltyPaise,
+    returnedPaise: value(delivered.filter(moneyReturned)),
     awaitingPaise: value(live.filter(i => i.order.status !== 'DELIVERED')),
     cancelledPaise: value(items.filter(i => i.order.status === 'CANCELLED')),
     // Performance: rates as whole-number percentages, plus the shop's rating.

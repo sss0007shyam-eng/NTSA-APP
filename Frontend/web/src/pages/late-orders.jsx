@@ -14,7 +14,7 @@ const intl = s => { const d = digits(s); return d.length === 10 ? `91${d}` : d; 
 export const telHref = s => `tel:+${intl(s)}`;
 export const waHref = (s, text) => `https://wa.me/${intl(s)}?text=${encodeURIComponent(text)}`;
 
-export const shortId = id => id.slice(-8).toUpperCase();
+export const shortId = id => id.slice(0, 10).toUpperCase();
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const lateText = o => o.daysLate >= 1 ? plural(o.daysLate, 'day') : plural(Math.max(1, o.hoursLate), 'hour');
 const dueText = o => new Date(o.dueAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });

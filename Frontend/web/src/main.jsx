@@ -318,7 +318,7 @@ function App() {
               }
               action(() => api(`/admin/refunds/${r.id}`, { method: 'PATCH', body }), 'Return updated');
             };
-            return <tr key={r.id}><td><strong>{r.orderItem.name}</strong><small>#{r.orderItem.orderId.slice(-8).toUpperCase()}</small></td><td><Badge>{r.kind === 'EXCHANGE' ? 'Exchange' : 'Return'}</Badge></td><td>{r.reason}{r.exchangeNote && <small className="muted">Wants: {r.exchangeNote}</small>}</td><td>{r.kind === 'EXCHANGE' ? <small className="muted">—</small> : money(r.orderItem.unitPaise * r.orderItem.quantity)}</td><td><Badge>{r.status.replace(/_/g, ' ')}</Badge>{r.pickupAt && <small className="muted">{new Date(r.pickupAt).toLocaleDateString()}</small>}</td><td>{next.length ? <div className="row-actions">{next.map(([label, status]) => <button key={status} disabled={busy} className={status === 'REJECTED' ? 'danger-text' : undefined} onClick={() => move(status)}>{label}</button>)}</div> : <small className="muted">—</small>}</td></tr>;
+            return <tr key={r.id}><td><strong>{r.orderItem.name}</strong><small>#{r.orderItem.orderId.slice(0, 10).toUpperCase()}</small></td><td><Badge>{r.kind === 'EXCHANGE' ? 'Exchange' : 'Return'}</Badge></td><td>{r.reason}{r.exchangeNote && <small className="muted">Wants: {r.exchangeNote}</small>}</td><td>{r.kind === 'EXCHANGE' ? <small className="muted">—</small> : money(r.orderItem.unitPaise * r.orderItem.quantity)}</td><td><Badge>{r.status.replace(/_/g, ' ')}</Badge>{r.pickupAt && <small className="muted">{new Date(r.pickupAt).toLocaleDateString()}</small>}</td><td>{next.length ? <div className="row-actions">{next.map(([label, status]) => <button key={status} disabled={busy} className={status === 'REJECTED' ? 'danger-text' : undefined} onClick={() => move(status)}>{label}</button>)}</div> : <small className="muted">—</small>}</td></tr>;
           })}</tbody></table></div>{!refunds.length && <Empty text="No returns yet"/>}</section>}
           {['To pack', 'Packed', 'Cancelled'].includes(page) && <section className="panel"><div className="panel-heading"><h2>{page === 'To pack' ? 'Waiting to be packed' : page === 'Packed' ? 'Packed and on the way' : 'Cancelled — do not pack these'} <span className="count">{packingList(page).length}</span></h2>{page === 'Cancelled' && <p>The buyer called these off. Open one to see the bill, stamped CANCELLED.</p>}</div>
             <div className="table-scroll"><table><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Deliver to</th><th>Placed</th><th/></tr></thead><tbody>
@@ -696,7 +696,7 @@ function SupportTicketsPage({ tickets, query, setQuery, busy, onReply, onResolve
       <tbody>
         {shown.map(t => <React.Fragment key={t.id}>
           <tr>
-            <td>{t.kind && t.kind !== 'GENERAL' && <span className="kind-badge">{KIND_LABEL[t.kind] || t.kind}</span>}<strong>{t.subject}</strong>{t.productId && <small>Flagged product</small>}{t.orderId && <small>Order #{t.orderId.slice(-8).toUpperCase()}</small>}{t.awaitingDeliveryTeam && <span className="wait-badge">Waiting on delivery team</span>}</td>
+            <td>{t.kind && t.kind !== 'GENERAL' && <span className="kind-badge">{KIND_LABEL[t.kind] || t.kind}</span>}<strong>{t.subject}</strong>{t.productId && <small>Flagged product</small>}{t.orderId && <small>Order #{t.orderId.slice(0, 10).toUpperCase()}</small>}{t.awaitingDeliveryTeam && <span className="wait-badge">Waiting on delivery team</span>}</td>
             <td>{t.raisedByRole === 'CUSTOMER' ? <>{t.user?.name || 'Customer'}<small>Customer{t.user?.phone ? ` · ${t.user.phone}` : ''}</small></> : t.raisedByRole === 'SELLER' ? (t.seller?.shopName || 'Seller') : 'Admin'}{t.rating ? <small>Rated {'★'.repeat(t.rating)}</small> : null}</td>
             <td><Badge>{t.status === 'OPEN' ? 'Open' : 'Resolved'}</Badge></td>
             <td><small>{new Date(t.updatedAt).toLocaleString('en-IN')}</small></td>
@@ -1355,6 +1355,8 @@ function Attachment({ url }) {
     ? <video src={url} controls preload="metadata"/>
     : <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="Attachment"/></a>;
 }
+// Shops that still have to pack their own line before the order can be packed.
+const unpackedSellers = order => [...new Set(order.items.filter(i => i.sellerId && !i.packedAt).map(i => i.sellerName || 'A seller'))];
 function OrderDetails({ order, admin, busy, action, next, onCancel, onSetDelivery, onSetExtras }) {
   const [otp, setOtp] = useState(''), [code, setCode] = useState(''), [cancelling, setCancelling] = useState(false), [editingDelivery, setEditingDelivery] = useState(false);
   const [invoiceBusy, setInvoiceBusy] = useState(false), [invoiceError, setInvoiceError] = useState('');
@@ -1367,7 +1369,7 @@ function OrderDetails({ order, admin, busy, action, next, onCancel, onSetDeliver
   // own, and only before it's packed (the backend enforces the same).
   const cancellable = onCancel && !['DELIVERED', 'CANCELLED'].includes(order.status) && (admin || ['PENDING_PAYMENT', 'PLACED'].includes(order.status));
   const localDate = v => v ? new Date(v).toISOString().slice(0, 10) : '';
-  return <div className="order-detail"><div className="detail-summary"><strong>#{order.id.slice(-8).toUpperCase()}</strong><Badge>{order.status}</Badge></div>
+  return <div className="order-detail"><div className="detail-summary"><strong>#{order.id.slice(0, 10).toUpperCase()}</strong><Badge>{order.status}</Badge></div>
     <div style={{ margin: '2px 0 16px', display: 'flex', gap: 10, flexWrap: 'wrap' }}><Button secondary disabled={invoiceBusy} onClick={viewBill}><FileText size={15}/>{invoiceBusy ? 'Opening…' : 'View / download bill'}</Button>{admin && onSetExtras && order.status !== 'CANCELLED' && <Button secondary onClick={() => setEditingBill(v => !v)}><Plus size={15}/>Edit the bill</Button>}</div>
     {invoiceError && <div className="alert" role="alert">{invoiceError}</div>}
     {admin && onSetExtras && editingBill && <div className="editor" style={{ marginBottom: 16, padding: 14, background: '#fafbfc', borderRadius: 10 }}>
@@ -1388,7 +1390,8 @@ function OrderDetails({ order, admin, busy, action, next, onCancel, onSetDeliver
           <div style={{ display: 'flex', gap: 10 }}><Button secondary type="button" onClick={() => setEditingDelivery(false)}>Cancel</Button><Button disabled={busy}>Save</Button></div>
         </form>
       : <p><button className="text-button" style={{ display: 'inline', padding: 0 }} onClick={() => setEditingDelivery(true)}>{order.deliveryPartner || order.expectedDeliveryAt ? 'Edit delivery partner / ETA' : 'Set delivery partner / ETA'}</button></p>)}
-    {admin && next[order.status] && <Button disabled={busy} onClick={() => action(() => api(`/admin/orders/${order.id}/status`, { method: 'PATCH', body: { status: next[order.status] } }))}>Mark {next[order.status].toLowerCase().replaceAll('_', ' ')}</Button>}
+    {admin && order.status === 'PLACED' && unpackedSellers(order).length > 0 && <p className="danger-text">Waiting on {unpackedSellers(order).join(', ')} to pack their item{unpackedSellers(order).length > 1 ? 's' : ''} first.</p>}
+    {admin && next[order.status] && <Button disabled={busy || (order.status === 'PLACED' && unpackedSellers(order).length > 0)} onClick={() => action(() => api(`/admin/orders/${order.id}/status`, { method: 'PATCH', body: { status: next[order.status] } }))}>Mark {next[order.status].toLowerCase().replaceAll('_', ' ')}</Button>}
     {order.status !== 'PENDING_PAYMENT' && <ShipmentSection order={order} canEdit={admin} canDeliver={admin} busy={busy} action={action}/>}
     {admin && order.status === 'OUT_FOR_DELIVERY' && <form onSubmit={e => { e.preventDefault(); action(() => api(`/admin/orders/${order.id}/deliver`, { method: 'POST', body: { otp } })); }}><Field label="Recipient's delivery OTP" value={otp} onChange={e => setOtp(e.target.value)} pattern="[0-9]{6}" maxLength={6} required/><Button disabled={busy}>Verify and confirm delivery</Button></form>}
     {order.status === 'CANCELLED' && <p className="danger-text"><strong>Cancelled{order.cancelledBy ? ` by ${order.cancelledBy.toLowerCase()}` : ''}.</strong>{order.cancelReason ? ` ${order.cancelReason}` : ''} Stock has been put back.</p>}

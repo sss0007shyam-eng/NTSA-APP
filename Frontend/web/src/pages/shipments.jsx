@@ -27,7 +27,7 @@ export function ShipmentsPage({ orders }) {
       <div className="table-scroll"><table>
         <thead><tr><th>Order</th><th>Customer</th><th>Deliver to</th><th>Stage</th><th>Updated</th></tr></thead>
         <tbody>{shipments.map(o => <tr key={o.id}>
-          <td><strong>#{o.id.slice(-8).toUpperCase()}</strong><small>{money(o.totalPaise)} · {o.items.length} item(s)</small></td>
+          <td><strong>#{o.id.slice(0, 10).toUpperCase()}</strong><small>{money(o.totalPaise)} · {o.items.length} item(s)</small></td>
           <td>{o.address?.name}<br/><small>{o.address?.phone}</small></td>
           <td><small>{[o.address?.city, o.address?.state, o.address?.postalCode].filter(Boolean).join(', ')}</small></td>
           <td><Badge>{o.status}</Badge></td>
