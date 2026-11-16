@@ -93,7 +93,6 @@ function App() {
     try { await fn(); setToast(message); await load(); setModal(null); } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
-  if (!session) return <Login onLogin={token => { sessionStorage.setItem('ntsa-token', token); setSession(token); }}/>;
   // A line needs packing once it's PLACED and this shop hasn't ticked it off
   // yet -- NTSA's own stock never shows up here, only ever the seller's own.
   const toPack = orders.filter(o => o.status === 'PLACED' && !o.packedAt);
@@ -121,6 +120,11 @@ function App() {
   function go(name) { setPage(name); try { sessionStorage.setItem('ntsa-page', name); } catch {} setQuery(''); setMobileNav(false); }
   // If the admin hides the page you're on, fall back to Overview.
   useEffect(() => { if (!nav.some(([name]) => name === page)) setPage('Overview'); }, [hiddenPages]);
+
+  // Only after every hook above has run: returning earlier made the hook count
+  // differ between the login screen and the signed-in panel, and React blanked
+  // the whole page right after sign-in.
+  if (!session) return <Login onLogin={token => { sessionStorage.setItem('ntsa-token', token); setSession(token); }}/>;
 
   return <div className="app-shell">
     <aside className={mobileNav ? 'sidebar open' : 'sidebar'}>
