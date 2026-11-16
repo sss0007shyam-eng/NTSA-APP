@@ -279,7 +279,7 @@ function App() {
               <tbody>{toPack.map(o => <tr key={o.id}>
                 <td><div className="product-cell">{o.image ? <img className="product-image" src={o.image} alt=""/> : <div className="product-image placeholder"><Package/></div>}<div><strong>{o.name}</strong>{(o.size || o.color) && <small>{[o.size, o.color].filter(Boolean).join(' · ')}</small>}</div></div></td>
                 <td><strong>#{o.orderId.slice(0, 10).toUpperCase()}</strong><small>{new Date(o.placedAt).toLocaleDateString('en-IN')}</small></td>
-                <td>{o.buyerName ? <><strong>{o.buyerName}</strong>{o.address && <small>{o.address.phone}<br/>{o.address.line1}, {o.address.city}, {o.address.state} {o.address.postalCode}</small>}</> : <span className="muted">—</span>}</td>
+                <td>{o.buyerName ? <><strong>{o.buyerName}</strong>{o.address && <small>{o.address.city}, {o.address.state} {o.address.postalCode}</small>}</> : <span className="muted">—</span>}</td>
                 <td>{o.quantity}</td>
                 <td><Button disabled={busy} onClick={() => action(() => api(`/seller/orders/${o.id}/pack`, { method: 'POST' }), 'Marked packed')}><Check size={16}/>Mark packed</Button></td>
               </tr>)}</tbody>
@@ -532,7 +532,7 @@ function OrderTable({ orders, full, onCancel, onOpen }) {
     <tbody>{orders.map(o => <tr key={o.id} className={onOpen ? 'row-clickable' : ''} onClick={onOpen ? () => onOpen(o) : undefined}>
       <td><div className="product-cell">{o.image ? <img className="product-image" src={o.image} alt=""/> : <div className="product-image placeholder"><Package/></div>}<div><strong>{o.name}</strong>{(o.size || o.color) && <small>{[o.size, o.color].filter(Boolean).join(' · ')}</small>}</div></div></td>
       <td><strong>#{o.orderId.slice(0, 10).toUpperCase()}</strong><small>{full ? new Date(o.placedAt).toLocaleDateString('en-IN') : `${o.buyerName || o.buyer} · ${new Date(o.placedAt).toLocaleDateString('en-IN')}`}</small></td>
-      {full && <td>{o.buyerName ? <><strong>{o.buyerName}</strong>{o.address && <small>{o.address.phone}<br/>{o.address.line1}, {o.address.city}, {o.address.state} {o.address.postalCode}</small>}</> : <span className="muted">—</span>}</td>}
+      {full && <td>{o.buyerName ? <><strong>{o.buyerName}</strong>{o.address && <small>{o.address.city}, {o.address.state} {o.address.postalCode}</small>}</> : <span className="muted">—</span>}</td>}
       <td>{o.quantity}</td>
       <td>{money(o.grossPaise ?? o.unitPaise * o.quantity)}{full && <small>{money(o.unitPaise)} each</small>}</td>
       {full && <td>{money(o.netPaise)}<small>{money(o.commissionPaise)} commission ({o.commissionPercent}%)</small></td>}

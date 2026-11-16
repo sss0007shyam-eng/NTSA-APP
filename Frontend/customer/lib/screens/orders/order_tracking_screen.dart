@@ -65,6 +65,13 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     'COMPLETED': 'orders.refund.completed',
     'REJECTED': 'orders.refund.rejected',
   };
+  // An exchange never pays money back, so its own wording where it differs.
+  static const _exchangeKeys = {
+    'REQUESTED': 'orders.exchange.requested',
+    'APPROVED': 'orders.exchange.approved',
+    'COMPLETED': 'orders.exchange.completed',
+    'REJECTED': 'orders.exchange.rejected',
+  };
 
   /// The Backend allows a buyer to cancel only before the order is packed.
   static bool _canCancel(Order order) => order.status == 'PLACED' || order.status == 'PENDING_PAYMENT';
@@ -207,7 +214,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   Future<void> _requestRefund(OrderItem item) async {
     final result = await showDialog<Map<String, String?>>(context: context, builder: (_) => _RefundDialog(itemName: item.name));
     if (result == null || !mounted) return;
-    final requestedMsg = context.tr('orders.refund.requested');
+    final requestedMsg = context.tr(result['kind'] == 'EXCHANGE' ? 'orders.exchange.requested' : 'orders.refund.requested');
     setState(() => _refunding.add(item.id));
     try {
       await ApiClient.instance.post('/orders/${widget.orderId}/refunds', data: {
@@ -270,7 +277,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                           if (order.status == 'PENDING_PAYMENT')
                             _StatusBanner(icon: Icons.hourglass_top_rounded, color: AppColors.orange, title: context.tr('orders.track.awaiting_title'), message: context.tr('orders.track.awaiting_message'))
                           else if (order.status == 'CANCELLED')
-                            _StatusBanner(icon: Icons.cancel_outlined, color: AppColors.danger, title: context.tr('orders.track.cancelled_title'), message: context.tr('orders.track.cancelled_message'))
+                            _StatusBanner(icon: Icons.cancel_outlined, color: AppColors.danger, title: context.tr('orders.track.cancelled_title'), message: (order.cancelReason ?? '').trim().isEmpty ? context.tr('orders.track.cancelled_message') : '${context.tr('orders.track.cancelled_message')}\n"${order.cancelReason!.trim()}"')
                           else
                             ..._timeline(order),
                           if (order.status != 'CANCELLED' && order.status != 'DELIVERED' && (order.deliveryPartner != null || order.expectedDeliveryAt != null)) ...[
@@ -372,7 +379,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   }
 
   Widget _itemRow(Order order, OrderItem item) {
-    final refundKey = _refundKeys[item.refundStatus];
+    final exchange = item.refundKind == 'EXCHANGE';
+    final refundKey = (exchange ? _exchangeKeys[item.refundStatus] : null) ?? _refundKeys[item.refundStatus];
     final refundLabel = refundKey == null ? null : context.tr(refundKey);
     final canRefund = order.status == 'DELIVERED' && item.refundEligible && !order.isVendorOrder && item.id.isNotEmpty;
     return Padding(
@@ -387,7 +395,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                 if (item.variantText.isNotEmpty) Text(item.variantText, style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                 if (refundLabel != null)
                   Text(
-                    item.refundKind == 'EXCHANGE' ? '${context.tr('orders.refund.kind.exchange')} · $refundLabel' : refundLabel,
+                    // Pickup steps read the same for both, so say which one it is.
+                    exchange && _exchangeKeys[item.refundStatus] == null ? '${context.tr('orders.refund.kind.exchange')} · $refundLabel' : refundLabel,
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: item.refundStatus == 'REJECTED' ? AppColors.danger : (item.refundStatus == 'APPROVED' || item.refundStatus == 'COMPLETED') ? AppColors.success : AppColors.orange),
                   ),
                 if (item.refundPickupAt != null && (item.refundStatus == 'PICKUP_SCHEDULED' || item.refundStatus == 'PICKED_UP'))
@@ -401,7 +410,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                   TextButton(
                     style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                     onPressed: _refunding.contains(item.id) ? null : () => _requestRefund(item),
-                    child: Text(_refunding.contains(item.id) ? context.tr('orders.refund.requesting') : context.tr('orders.refund.request')),
+                    child: Text(_refunding.contains(item.id) ? context.tr('orders.refund.requesting') : context.tr('orders.refund.open')),
                   ),
               ],
             ),
@@ -565,7 +574,7 @@ class _RefundDialogState extends State<_RefundDialog> {
   Widget build(BuildContext context) {
     final valid = _reason.text.trim().length >= 5 && (_kind == 'RETURN' || _note.text.trim().isNotEmpty);
     return AlertDialog(
-      title: Text(context.tr('orders.refund.request')),
+      title: Text(context.tr('orders.refund.open')),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,

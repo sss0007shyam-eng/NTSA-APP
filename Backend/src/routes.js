@@ -1497,7 +1497,10 @@ router.get('/seller/orders', seller, async (req, res) => {
     const grossPaise = item.unitPaise * item.quantity;
     const commissionPaise = Math.round(grossPaise * commissionPercent / 100);
     return { ...item, image: product.images[0] ?? null, orderId: order.id, status: order.status, placedAt: order.createdAt,
-      buyerName: order.address?.name || null, buyer: order.vendorId ? 'Wholesale' : 'Customer', address: order.address || null,
+      // NTSA's courier delivers, the shop only packs: it gets the area, not the
+      // customer's phone or street.
+      buyerName: order.address?.name || null, buyer: order.vendorId ? 'Wholesale' : 'Customer',
+      address: order.address ? { city: order.address.city, state: order.address.state, postalCode: order.address.postalCode } : null,
       deliveryPartner: order.deliveryPartner || null, expectedDeliveryAt: order.expectedDeliveryAt || null, deliveredAt: order.deliveredAt || null,
       courierName: order.courierName || null, trackingNumber: order.trackingNumber || null, trackingUrl: trackingLinkFor(order),
       events: order.events, openIssues: order.tickets,

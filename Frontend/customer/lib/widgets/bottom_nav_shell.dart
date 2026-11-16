@@ -62,7 +62,8 @@ class _BottomNavShellState extends State<BottomNavShell> {
     final isDark = context.watch<ThemeProvider>().isDark;
     return Scaffold(
       body: IndexedStack(key: ValueKey(isDark), index: _index, children: _tabs),
-      floatingActionButton: FloatingActionButton(
+      // Not on the cart tab: there it sat on top of "Proceed to Checkout".
+      floatingActionButton: _index == 2 ? null : FloatingActionButton(
         heroTag: 'ai-assistant',
         backgroundColor: AppColors.orange,
         tooltip: context.tr('ai.title'),

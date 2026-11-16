@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/api_client.dart';
 import '../../core/app_colors.dart';
 import '../../l10n/tr.dart';
+import '../../models/address.dart';
 import '../../models/coupon.dart';
 import '../../providers/cart_provider.dart';
 import '../../providers/shop_provider.dart';
@@ -36,11 +37,44 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen> {
   // creating a duplicate.
   final _checkoutKey = const Uuid().v4();
 
+  // The address picked on step 1, shown back before the order is placed.
+  Address? _address;
+
+  @override
+  void initState() {
+    super.initState();
+    ApiClient.instance.get('/addresses').then((data) {
+      final match = (data as List).map((e) => Address.fromJson(e as Map<String, dynamic>)).where((a) => a.id == widget.addressId);
+      if (mounted && match.isNotEmpty) setState(() => _address = match.first);
+    }).catchError((_) {});
+  }
+
   @override
   void dispose() {
     _couponController.dispose();
     super.dispose();
   }
+
+  String _methodLabel(BuildContext context) => context.tr(switch (widget.method) {
+        PaymentMethod.wallet => 'checkout.payment.wallet',
+        PaymentMethod.cod => 'checkout.payment.cod',
+        PaymentMethod.razorpay => 'checkout.payment.upi',
+      });
+
+  Widget _reviewRow(IconData icon, String title, String body) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(icon, size: 18, color: AppColors.textSecondary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              const SizedBox(height: 2),
+              Text(body, style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary)),
+            ]),
+          ),
+        ]),
+      );
 
   /// UPI / card / net-banking route through the real payment gateway once
   /// the client supplies live Razorpay keys. Backend/src/services/payments.js
@@ -132,6 +166,11 @@ class _OrderSummaryScreenState extends State<OrderSummaryScreen> {
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 children: [
+                  if (_address != null)
+                    _reviewRow(Icons.location_on_outlined, context.tr('checkout.summary.deliver_to'),
+                        '${_address!.name} · ${_address!.phone}\n${_address!.line1}, ${_address!.city}, ${_address!.state} - ${_address!.postalCode}'),
+                  _reviewRow(Icons.payments_outlined, context.tr('checkout.summary.pay_with'), _methodLabel(context)),
+                  const Divider(height: 20),
                   Text(context.tr('checkout.summary.title'), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                   const SizedBox(height: 10),
                   ...cart.items.where((i) => i.available).map((item) => Padding(

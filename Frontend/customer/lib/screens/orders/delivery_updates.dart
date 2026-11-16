@@ -218,7 +218,7 @@ class _ReportSheetState extends State<_ReportSheet> {
               ),
             ),
             const SizedBox(height: 8),
-            TextField(controller: _text, minLines: 3, maxLines: 5, maxLength: 1000, decoration: InputDecoration(hintText: context.tr('sup.problem.hint'), border: const OutlineInputBorder())),
+            TextField(controller: _text, minLines: 3, maxLines: 5, maxLength: 1000, onChanged: (_) { if (_error != null) setState(() => _error = null); }, decoration: InputDecoration(hintText: context.tr('sup.problem.hint'), border: const OutlineInputBorder())),
             if (_error != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 13))),
             PrimaryButton(label: context.tr('sup.problem.send'), orange: true, loading: _busy, onPressed: _send),
           ],

@@ -85,6 +85,7 @@ class Order {
     this.trackingNumber,
     this.trackingUrl,
     this.events = const [],
+    this.cancelReason,
   });
 
   final String id;
@@ -106,6 +107,8 @@ class Order {
   final String? trackingUrl;
   /// The journey so far, oldest first.
   final List<ShipmentEvent> events;
+  /// What the buyer (or the admin) wrote when the order was cancelled.
+  final String? cancelReason;
 
   static const statusSteps = ['PLACED', 'PACKED', 'SHIPPED', 'OUT_FOR_DELIVERY', 'DELIVERED'];
 
@@ -121,6 +124,7 @@ class Order {
         paymentMethod: json['paymentMethod'] as String?,
         deliveredAt: DateTime.tryParse(json['deliveredAt']?.toString() ?? ''),
         deliveryPartner: json['deliveryPartner'] as String?,
+        cancelReason: json['cancelReason'] as String?,
         expectedDeliveryAt: DateTime.tryParse(json['expectedDeliveryAt']?.toString() ?? ''),
         isVendorOrder: json['vendorId'] != null,
         courierName: json['courierName'] as String?,
