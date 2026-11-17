@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
+import { QRCodeSVG } from 'qrcode.react';
 import { LayoutDashboard, Package, Shapes, Users, User, ShoppingBag, RotateCcw, LogOut, Search, Plus, ArrowUpRight, ChevronRight, Check, Menu, X, Truck, ShieldCheck, Wallet, Store, Image, Tag, Eye, EyeOff, Bell, ClipboardList, UserPlus, BadgeCheck, UserCog, MapPin, Paperclip, Settings as SettingsIcon, FileText, BarChart3, Star, TrendingUp, Stamp, LifeBuoy, MoreVertical, Route, Smartphone, Laptop, Ban } from 'lucide-react';
 import { api, money, paise, openInvoice, suggestCategory, SELLER_PANEL_URL } from './api';
 import { Button, Field, PasswordField, Badge, Empty, Modal, Stat, ProductImage, CONDITION_LABEL } from './ui';
@@ -638,6 +639,21 @@ function PackSlip({ order, busy, admin, onPackItem, onPacked }) {
     <h3>Pack this</h3>
     {order.items.map(i => <div key={i.id} className="line-item"><div><strong>{i.name}</strong>{(i.size || i.color) && <small className="variant">{[i.size && `Size / option: ${i.size}`, i.color && `Color: ${i.color}`].filter(Boolean).join(' · ')}</small>}<small>{i.sellerId ? (i.packedAt ? `✓ Packed by ${i.seller?.shopName}` : `Waiting on ${i.seller?.shopName} to pack this`) : 'NTSA’s own stock'}</small>{admin && i.sellerId && !i.packedAt && order.status === 'PLACED' && <button className="text-button" style={{ display: 'inline', padding: 0 }} disabled={busy} onClick={() => onPackItem(i)}>Pack it for them</button>}</div><strong>× {i.quantity}</strong></div>)}
     <div className="line-item"><strong>Total pieces</strong><strong>{order.items.reduce((s, i) => s + i.quantity, 0)}</strong></div>
+    {order.status !== 'CANCELLED' && <>
+      <h3>Package labels</h3>
+      <p className="muted">Each item ships separately — cut out its label and stick the QR on that packet. Scanning it brings up this order and item.</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8 }}>
+        {order.items.map(i => <div key={i.id} style={{ border: '1px solid #222', borderRadius: 8, padding: 10, display: 'flex', gap: 10, alignItems: 'center', width: 250 }}>
+          {/* order id + item id, so a scan identifies exactly this packet on delivery or a return. */}
+          <QRCodeSVG value={`ntsa:${order.id}:${i.id}`} size={76} level="M"/>
+          <div style={{ fontSize: 11.5, lineHeight: 1.35 }}>
+            <strong>#{order.id.slice(0, 10).toUpperCase()}</strong><br/>
+            {i.name}{(i.size || i.color) ? ` · ${[i.size, i.color].filter(Boolean).join(' / ')}` : ''}<br/>
+            Qty {i.quantity}{i.seller?.shopName ? ` · ${i.seller.shopName}` : ''}
+          </div>
+        </div>)}
+      </div>
+    </>}
     <h3>Deliver to</h3>
     <p><strong>{a.name}</strong> · {a.phone}<br/>{a.line1}, {a.city}, {a.state} {a.postalCode}</p>
     <p className="muted">Payment: {order.paymentMethod} · Order value {money(order.totalPaise)} · Placed {new Date(order.createdAt).toLocaleString('en-IN')}</p>
