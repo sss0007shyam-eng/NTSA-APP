@@ -4,6 +4,7 @@ import { db } from '../db.js';
 import { config } from '../config.js';
 import { requireThat } from '../lib/rules.js';
 import { sendSellerOtp } from './sms.js';
+import { sendEmail } from './email.js';
 // A seller's panel is their shop's till: a stolen username and password
 // shouldn't be enough on its own. So a sign-in from a browser or phone we
 // haven't seen before has to clear a one-time code sent to the phone number
@@ -36,7 +37,34 @@ export async function knownDevice(sellerId, deviceToken, { ip, userAgent } = {})
 export async function registerDevice(sellerId, { label, ip, userAgent }) {
   const deviceToken = randomBytes(32).toString('hex');
   await db.sellerDevice.create({ data: { sellerId, tokenHash: tokenHash(deviceToken), label, lastIp: ip ?? null, lastUserAgent: userAgent ?? null } });
+  // A device that was not trusted before is now signed in. Tell the seller --
+  // in the panel's bell and, if their email is on file and SMTP is set, by
+  // email -- so a sign-in they did not make cannot go unnoticed.
+  await alertNewDevice(sellerId, label, ip);
   return deviceToken;
+}
+/// The "your account was signed in on a new device" alert. Never throws: a
+/// failed alert must not block the sign-in that caused it.
+async function alertNewDevice(sellerId, label, ip) {
+  try {
+    const seller = await db.seller.findUnique({ where: { id: sellerId }, select: { shopName: true, email: true } });
+    if (!seller) return;
+    const where = label || 'a new device';
+    const line = `Your NTSA seller account was signed in on ${where}${ip ? ` (IP ${ip})` : ''}.`;
+    await db.notification.create({ data: {
+      audience: `SELLER:${sellerId}`, type: 'NEW_DEVICE_LOGIN', title: 'New sign-in to your account',
+      body: `${line} If this wasn't you, change your password and contact NTSA right away.`, entityId: sellerId,
+    } }).catch(() => {});
+    if (seller.email) {
+      await sendEmail({
+        to: seller.email,
+        subject: 'New sign-in to your NTSA seller account',
+        text: `Hello ${seller.shopName || ''},\n\n${line}\n\nIf this was you, you can ignore this email. If it was not, change your password immediately and contact NTSA.\n\n— NTSA`,
+      });
+    }
+  } catch (e) {
+    console.error('New-device alert failed:', e.message);
+  }
 }
 /// Starts the OTP challenge: a 6-digit code, stored only as a bcrypt hash
 /// with a 10-minute expiry and an attempt counter, exactly like a delivery
