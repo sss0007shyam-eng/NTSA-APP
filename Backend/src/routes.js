@@ -18,7 +18,7 @@ import { recordShipmentEvent, normalizeStatus } from './services/shipping.js';
 import { trackingLinkFor, matchCourier, courierPartnerJoin } from './lib/courier.js';
 import { uploadImage, uploadAttachment } from './services/storage.js';
 import { gateway, validSignature } from './services/payments.js';
-import { checkout, ownedOrder, publicOrder, orderInclude, ownerWhere, changeStatus, cancelOrder, CANCELLABLE_BY_BUYER, deliveryCode, deliver, requestRefund, reviewRefund, assertDeliverable } from './services/orders.js';
+import { checkout, ownedOrder, publicOrder, orderInclude, ownerWhere, changeStatus, cancelOrder, CANCELLABLE_BY_BUYER, deliveryCode, deliver, requestRefund, reviewRefund, payoutRefund, assertDeliverable } from './services/orders.js';
 import { streamInvoice, invoiceNumberFor } from './services/invoice.js';
 import { verifyGstin, verifyAadhaar, gstProviderConfigured, aadhaarProviderConfigured } from './services/verification.js';
 import { isVerifiedOutcome } from './lib/verification.js';
@@ -389,15 +389,29 @@ router.post('/orders/:id/cancel', buyer, async (req, res) => {
   res.json(order);
 });
 router.post('/orders/:id/refunds', customer, async (req, res) => {
-  const { itemId, reason, kind, exchangeNote } = z.object({
+  const data = z.object({
     itemId: z.string(), reason: z.string().trim().min(5).max(1000),
     kind: z.enum(['RETURN', 'EXCHANGE']).default('RETURN'),
     exchangeNote: z.string().trim().max(500).optional(),
+    // How the customer wants a return's money back. A COD order has no card to
+    // reverse, so they pick WALLET (instant credit) or give a BANK/UPI to be paid.
+    refundMethod: z.enum(['WALLET', 'BANK', 'UPI']).default('WALLET'),
+    bankAccount: z.string().trim().regex(/^\d{6,18}$/, 'Enter a valid account number').optional(),
+    bankIfsc: z.string().trim().regex(/^[A-Za-z]{4}0[A-Za-z0-9]{6}$/, 'Enter a valid IFSC').optional(),
+    bankHolder: z.string().trim().min(2).max(100).optional(),
+    upiId: z.string().trim().regex(/^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/, 'Enter a valid UPI id').optional(),
   }).parse(req.body);
+  const { itemId, reason, kind, exchangeNote, refundMethod } = data;
+  // An exchange sends a replacement, so it never collects bank/UPI.
+  const method = kind === 'EXCHANGE' ? 'WALLET' : refundMethod;
+  if (method === 'BANK') requireThat(data.bankAccount && data.bankIfsc && data.bankHolder, 400, 'Enter the account number, IFSC and account holder name');
+  if (method === 'UPI') requireThat(data.upiId, 400, 'Enter a UPI id');
   const order = await ownedOrder(req.actor, req.params.id);
   const line = order.items.find(i => i.id === itemId);
   requireThat(line, 404, 'Order item not found');
-  const refund = await requestRefund(req.actor, itemId, reason, kind, exchangeNote);
+  const refund = await requestRefund(req.actor, itemId, reason, kind, exchangeNote, method, {
+    bankAccount: data.bankAccount, bankIfsc: data.bankIfsc?.toUpperCase(), bankHolder: data.bankHolder, upiId: data.upiId,
+  });
   // The shop whose item is coming back hears it straight away, the same way
   // the courier's own bad news reaches them (SELLER_ALERT in services/
   // shipping.js) -- a return is theirs to answer for, and learning of it as a
@@ -1415,6 +1429,13 @@ router.patch('/admin/refunds/:id', async (req, res) => {
     pickupAt: z.coerce.date().optional(),
   }).parse(req.body);
   res.json(await reviewRefund(req.params.id, status, pickupAt));
+});
+// Records a bank/UPI refund payout (and finishes the return). The admin passes
+// the UTR of the transfer they made by hand; once a payout gateway is wired the
+// transfer happens automatically and its own reference is used instead.
+router.post('/admin/refunds/:id/payout', async (req, res) => {
+  const { payoutRef } = z.object({ payoutRef: z.string().trim().min(2).max(60).optional() }).parse(req.body);
+  res.json(await payoutRefund(req.params.id, payoutRef));
 });
 
 // ---- The seller panel (its own site; see Frontend/seller) ----

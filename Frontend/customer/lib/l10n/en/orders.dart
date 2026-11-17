@@ -201,4 +201,12 @@ const Map<String, String> enOrders = {
   'orders.exchange.completed': 'Exchange completed',
   'checkout.summary.deliver_to': 'Deliver to',
   'checkout.summary.pay_with': 'Payment',
+  'orders.refund.method_label': 'Where should the refund go?',
+  'orders.refund.method.wallet': 'NTSA Wallet (instant)',
+  'orders.refund.method.bank': 'Bank account',
+  'orders.refund.method.upi': 'UPI',
+  'orders.refund.bank_account': 'Account number',
+  'orders.refund.bank_ifsc': 'IFSC code',
+  'orders.refund.bank_holder': 'Account holder name',
+  'orders.refund.upi_id': 'UPI ID (e.g. name@bank)',
 };

@@ -217,11 +217,19 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     final requestedMsg = context.tr(result['kind'] == 'EXCHANGE' ? 'orders.exchange.requested' : 'orders.refund.requested');
     setState(() => _refunding.add(item.id));
     try {
+      final method = result['refundMethod'] ?? 'WALLET';
       await ApiClient.instance.post('/orders/${widget.orderId}/refunds', data: {
         'itemId': item.id,
         'reason': result['reason'],
         'kind': result['kind'],
         if ((result['note'] ?? '').isNotEmpty) 'exchangeNote': result['note'],
+        'refundMethod': method,
+        if (method == 'BANK') ...{
+          'bankAccount': result['bankAccount'],
+          'bankIfsc': result['bankIfsc'],
+          'bankHolder': result['bankHolder'],
+        },
+        if (method == 'UPI') 'upiId': result['upiId'],
       });
       _snack(requestedMsg);
       await _load();
@@ -561,18 +569,30 @@ class _RefundDialog extends StatefulWidget {
 class _RefundDialogState extends State<_RefundDialog> {
   final _reason = TextEditingController();
   final _note = TextEditingController();
+  final _account = TextEditingController();
+  final _ifsc = TextEditingController();
+  final _holder = TextEditingController();
+  final _upi = TextEditingController();
   String _kind = 'RETURN';
+  String _method = 'WALLET';
 
   @override
   void dispose() {
-    _reason.dispose();
-    _note.dispose();
+    for (final c in [_reason, _note, _account, _ifsc, _holder, _upi]) {
+      c.dispose();
+    }
     super.dispose();
+  }
+
+  bool get _payoutValid {
+    if (_kind == 'EXCHANGE' || _method == 'WALLET') return true;
+    if (_method == 'BANK') return _account.text.trim().length >= 6 && _ifsc.text.trim().length >= 11 && _holder.text.trim().length >= 2;
+    return _upi.text.trim().contains('@');
   }
 
   @override
   Widget build(BuildContext context) {
-    final valid = _reason.text.trim().length >= 5 && (_kind == 'RETURN' || _note.text.trim().isNotEmpty);
+    final valid = _reason.text.trim().length >= 5 && (_kind == 'RETURN' || _note.text.trim().isNotEmpty) && _payoutValid;
     return AlertDialog(
       title: Text(context.tr('orders.refund.open')),
       content: SingleChildScrollView(
@@ -608,13 +628,45 @@ class _RefundDialogState extends State<_RefundDialog> {
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(labelText: context.tr('orders.refund.exchange_label'), hintText: context.tr('orders.refund.exchange_hint')),
               ),
+            // A return gives the money back: to the NTSA wallet (instant) or to
+            // the customer's own bank/UPI. An exchange sends a replacement, so
+            // no money choice is shown.
+            if (_kind == 'RETURN') ...[
+              const SizedBox(height: 14),
+              Text(context.tr('orders.refund.method_label'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              const SizedBox(height: 6),
+              SegmentedButton<String>(
+                segments: [
+                  ButtonSegment(value: 'WALLET', label: Text(context.tr('orders.refund.method.wallet'))),
+                  ButtonSegment(value: 'BANK', label: Text(context.tr('orders.refund.method.bank'))),
+                  ButtonSegment(value: 'UPI', label: Text(context.tr('orders.refund.method.upi'))),
+                ],
+                selected: {_method},
+                onSelectionChanged: (s) => setState(() => _method = s.first),
+                style: ButtonStyle(visualDensity: VisualDensity.compact),
+                showSelectedIcon: false,
+              ),
+              if (_method == 'BANK') ...[
+                TextField(controller: _holder, maxLength: 100, onChanged: (_) => setState(() {}), decoration: InputDecoration(labelText: context.tr('orders.refund.bank_holder'), counterText: '')),
+                TextField(controller: _account, keyboardType: TextInputType.number, maxLength: 18, onChanged: (_) => setState(() {}), decoration: InputDecoration(labelText: context.tr('orders.refund.bank_account'), counterText: '')),
+                TextField(controller: _ifsc, maxLength: 11, textCapitalization: TextCapitalization.characters, onChanged: (_) => setState(() {}), decoration: InputDecoration(labelText: context.tr('orders.refund.bank_ifsc'), counterText: '')),
+              ],
+              if (_method == 'UPI')
+                TextField(controller: _upi, onChanged: (_) => setState(() {}), decoration: InputDecoration(labelText: context.tr('orders.refund.upi_id'))),
+            ],
           ],
         ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(context.tr('common.cancel'))),
         TextButton(
-          onPressed: valid ? () => Navigator.of(context).pop({'reason': _reason.text.trim(), 'kind': _kind, 'note': _note.text.trim()}) : null,
+          onPressed: valid
+              ? () => Navigator.of(context).pop({
+                    'reason': _reason.text.trim(), 'kind': _kind, 'note': _note.text.trim(),
+                    'refundMethod': _kind == 'EXCHANGE' ? 'WALLET' : _method,
+                    'bankAccount': _account.text.trim(), 'bankIfsc': _ifsc.text.trim(), 'bankHolder': _holder.text.trim(), 'upiId': _upi.text.trim(),
+                  })
+              : null,
           child: Text(context.tr('orders.refund.submit')),
         ),
       ],

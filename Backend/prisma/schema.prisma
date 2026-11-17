@@ -26,6 +26,14 @@ enum RefundKind {
   RETURN
   EXCHANGE
 }
+// Where a RETURN's money goes back. WALLET is instant store credit; BANK and
+// UPI are real money the admin pays out (by hand, or via a payout gateway once
+// one is wired). EXCHANGE never pays money back, so it is always WALLET here.
+enum RefundMethod {
+  WALLET
+  BANK
+  UPI
+}
 enum DiscountType {
   PERCENT
   FLAT
@@ -639,6 +647,17 @@ model Refund {
   kind RefundKind @default(RETURN)
   exchangeNote String?
   status RefundStatus @default(REQUESTED)
+  // How the customer wants a RETURN's money back, and the details for it. For
+  // BANK: account number, IFSC and the holder's name. For UPI: the UPI id.
+  refundMethod RefundMethod @default(WALLET)
+  bankAccount String?
+  bankIfsc String?
+  bankHolder String?
+  upiId String?
+  // The payout's bank/UPI reference (UTR) and when it was paid, once the admin
+  // (or the gateway) has sent a BANK/UPI refund.
+  payoutRef String?
+  payoutAt DateTime?
   // When the courier is booked to collect the item from the customer.
   pickupAt DateTime?
   createdAt DateTime @default(now())

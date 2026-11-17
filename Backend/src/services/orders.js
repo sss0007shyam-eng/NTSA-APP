@@ -6,6 +6,7 @@ import { checkoutSchema } from '../lib/validation.js';
 import { variantFor, priceFor } from '../lib/variants.js';
 import { notifyOrder } from './firebase.js';
 import { trackingLinkFor } from '../lib/courier.js';
+import { sendRefundPayout } from './payouts.js';
 // Every item carries its own seller's shop name (null = NTSA's own stock)
 // and the product's photo, so anyone looking at an order -- the admin
 // list, a customer's own order, a packing slip -- can tell whose product
@@ -232,12 +233,18 @@ export async function deliver(id, otp) {
   await notifyOrder(result.userId && await db.user.findUnique({ where: { id: result.userId } }), result);
   return publicOrder(result);
 }
-export async function requestRefund(actor, itemId, reason, kind = 'RETURN', exchangeNote = null) {
+export async function requestRefund(actor, itemId, reason, kind = 'RETURN', exchangeNote = null, refundMethod = 'WALLET', payout = {}) {
   return atomic(async tx => {
     const item = await tx.orderItem.findUnique({ where: { id: itemId }, include: { order: true, refund: true } });
     requireThat(item?.order.userId === actor.id, 404, 'Order item not found');
     requireThat(eligible(item, item.order), 400, 'Refund window has expired or a request already exists');
-    const refund = await tx.refund.create({ data: { orderItemId: itemId, reason, kind, exchangeNote: exchangeNote || null } });
+    const refund = await tx.refund.create({ data: {
+      orderItemId: itemId, reason, kind, exchangeNote: exchangeNote || null, refundMethod,
+      bankAccount: refundMethod === 'BANK' ? payout.bankAccount || null : null,
+      bankIfsc: refundMethod === 'BANK' ? payout.bankIfsc || null : null,
+      bankHolder: refundMethod === 'BANK' ? payout.bankHolder || null : null,
+      upiId: refundMethod === 'UPI' ? payout.upiId || null : null,
+    } });
     await tx.orderItem.update({ where: { id: itemId }, data: { refundEligible: false } });
     await syncEligibility(tx, item.orderId);
     return refund;
@@ -262,9 +269,10 @@ export async function reviewRefund(id, status, pickupAt) {
     const refund = await tx.refund.findUnique({ where: { id }, include: { orderItem: { include: { order: true } } } });
     requireThat(refund, 404, 'Refund not found');
     requireThat((REFUND_NEXT[refund.status] || []).includes(status), 409, 'That is not a valid next step for this return');
-    // A RETURN gives the money back the moment it is approved; an EXCHANGE sends
-    // a replacement instead, so no wallet credit.
-    if (status === 'APPROVED' && refund.kind === 'RETURN') {
+    // A WALLET return credits the store wallet the moment it is approved (instant).
+    // A BANK/UPI return is real money the admin pays out later (see payoutRefund),
+    // and an EXCHANGE sends a replacement -- neither touches the wallet here.
+    if (status === 'APPROVED' && refund.kind === 'RETURN' && refund.refundMethod === 'WALLET') {
       const item = refund.orderItem;
       const wallet = await tx.wallet.findUnique({ where: { userId: item.order.userId } });
       const amountPaise = item.quantity * item.unitPaise;
@@ -272,10 +280,35 @@ export async function reviewRefund(id, status, pickupAt) {
       await tx.wallet.update({ where: { id: wallet.id }, data: { balancePaise: { increment: amountPaise } } });
       await tx.walletTransaction.create({ data: { walletId: wallet.id, amountPaise, kind: 'REFUND', reference: `refund:${id}` } });
     }
+    // A bank/UPI return is only finished once the money has actually been sent,
+    // so it cannot be marked completed from here -- the admin records the payout
+    // (payoutRefund) instead, which sets COMPLETED with the reference.
+    if (status === 'COMPLETED' && refund.kind === 'RETURN' && refund.refundMethod !== 'WALLET' && !refund.payoutRef) {
+      requireThat(false, 400, 'Record the bank/UPI refund payment first (use "Pay refund")');
+    }
     const data = { status };
     if (status === 'APPROVED' || status === 'REJECTED') data.reviewedAt = new Date();
     if (status === 'PICKUP_SCHEDULED') data.pickupAt = pickupAt ?? null;
     return tx.refund.update({ where: { id }, data });
+  });
+}
+// Records a BANK/UPI refund payout and finishes the return. The real transfer
+// goes through the payout gateway when one is configured; until then the admin
+// pays by hand and passes the bank/UPI reference (UTR) they got.
+export async function payoutRefund(id, manualRef) {
+  return atomic(async tx => {
+    const refund = await tx.refund.findUnique({ where: { id }, include: { orderItem: true } });
+    requireThat(refund, 404, 'Refund not found');
+    requireThat(refund.kind === 'RETURN' && refund.refundMethod !== 'WALLET', 400, 'This refund is not a bank/UPI payout');
+    requireThat(!refund.payoutRef, 409, 'This refund has already been paid');
+    requireThat(['PICKED_UP', 'COMPLETED'].includes(refund.status), 400, 'Collect the item back before paying the refund');
+    const amountPaise = refund.orderItem.quantity * refund.orderItem.unitPaise;
+    // Gateway seam: returns a reference when wired, else null so the admin's
+    // own UTR is used.
+    const gatewayRef = await sendRefundPayout(refund, amountPaise).catch(() => null);
+    const payoutRef = gatewayRef || manualRef;
+    requireThat(payoutRef, 400, 'Enter the bank/UPI reference (UTR) of the payment');
+    return tx.refund.update({ where: { id }, data: { status: 'COMPLETED', payoutRef, payoutAt: new Date() } });
   });
 }
 export async function expireJobs(now = new Date()) {

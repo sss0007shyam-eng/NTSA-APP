@@ -8,6 +8,9 @@ CREATE TYPE "RefundStatus" AS ENUM ('REQUESTED', 'APPROVED', 'PICKUP_SCHEDULED',
 CREATE TYPE "RefundKind" AS ENUM ('RETURN', 'EXCHANGE');
 
 -- CreateEnum
+CREATE TYPE "RefundMethod" AS ENUM ('WALLET', 'BANK', 'UPI');
+
+-- CreateEnum
 CREATE TYPE "DiscountType" AS ENUM ('PERCENT', 'FLAT');
 
 -- CreateTable
@@ -449,6 +452,13 @@ CREATE TABLE "refunds" (
     "kind" "RefundKind" NOT NULL DEFAULT 'RETURN',
     "exchangeNote" TEXT,
     "status" "RefundStatus" NOT NULL DEFAULT 'REQUESTED',
+    "refundMethod" "RefundMethod" NOT NULL DEFAULT 'WALLET',
+    "bankAccount" TEXT,
+    "bankIfsc" TEXT,
+    "bankHolder" TEXT,
+    "upiId" TEXT,
+    "payoutRef" TEXT,
+    "payoutAt" TIMESTAMP(3),
     "pickupAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "reviewedAt" TIMESTAMP(3),
