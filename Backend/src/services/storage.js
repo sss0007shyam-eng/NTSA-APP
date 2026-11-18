@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { requireThat } from '../lib/rules.js';
 import { config } from '../config.js';
 import { stampLogo } from './watermark.js';
+import { firebaseStorageConfigured, uploadToFirebase } from './firebase.js';
 
 const EXTENSION = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 // Chat attachments may also be a short clip -- a wholesaler showing damaged
@@ -28,6 +29,11 @@ export async function uploadAttachment(file) {
       }, (error, result) => error ? reject(error) : resolve({ url: result.secure_url, kind: isVideo ? 'VIDEO' : 'IMAGE' }));
       stream.end(file.buffer);
     });
+  }
+  if (firebaseStorageConfigured()) {
+    const ext = isVideo ? VIDEO_EXTENSION[file.mimetype] : EXTENSION[file.mimetype];
+    const url = await uploadToFirebase(file.buffer, { folder: 'ntsa/chat', ext, contentType: file.mimetype });
+    return { url, kind: isVideo ? 'VIDEO' : 'IMAGE' };
   }
   requireThat(config.DEMO_MODE, 503, 'Cloudinary is not configured');
   await mkdir(UPLOAD_DIR, { recursive: true });
@@ -54,6 +60,10 @@ export async function uploadImage(file, { watermark = false } = {}) {
       }, (error, result) => error ? reject(error) : resolve({ url: result.secure_url }));
       stream.end(buffer);
     });
+  }
+  if (firebaseStorageConfigured()) {
+    const url = await uploadToFirebase(buffer, { folder: 'ntsa/products', ext: EXTENSION[file.mimetype], contentType: file.mimetype });
+    return { url };
   }
   // Dev-only stand-in for Cloudinary until the client provides real
   // credentials: save to disk and serve it back over the API's own origin.
